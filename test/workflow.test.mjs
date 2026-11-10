@@ -1,0 +1,196 @@
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { mkdtempSync, rmSync, rmdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { DatabaseSync } from 'node:sqlite';
+
+test('로컬 역할 권한, 대행사 수익, 광고 집행과 보상', { timeout: 20000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'adsform-test-'));
+  const db = join(dir, 'workflow.sqlite');
+  const port = process.env.ADSFORM_TEST_PORT || '4318';
+  const origin = `http://127.0.0.1:${port}`;
+  const server = spawn(process.execPath, [fileURLToPath(new URL('../server.mjs', import.meta.url))], {
+    env: { ...process.env, ADSFORM_DB: db, ADSFORM_PORT: port, ADSFORM_DEMO: '1', ADSFORM_PUBLIC_ORIGIN: 'https://adsform.example' },
+    stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true
+  });
+  let log = '';
+  server.stderr.on('data', chunk => { log += chunk; });
+  const exit = once(server, 'exit');
+
+  async function request(path, { cookie, body, expected = 200, site = origin } = {}) {
+    const headers = { ...(cookie ? { Cookie: cookie } : {}), ...(body ? { Origin: site, 'Content-Type': 'application/json' } : {}) };
+    const result = await fetch(origin + '/api/' + path, { headers, ...(body ? { method: 'POST', body: JSON.stringify(body) } : {}) });
+    const data = await result.json();
+    assert.equal(result.status, expected, JSON.stringify(data));
+    return { data, cookie: result.headers.get('set-cookie')?.split(';')[0] };
+  }
+  const session = async role => (await request('demo', { body: { role } })).cookie;
+  const state = async cookie => (await request('state', { cookie })).data;
+  const post = async (path, cookie, body, expected) => (await request(path, { cookie, body, expected })).data;
+
+  try {
+    await Promise.race([once(server.stdout, 'data'), exit.then(() => { throw new Error(log); })]);
+    const page = await fetch(origin + '/missions?kind=quiz');
+    const html = await page.text();
+    assert.match(html, /property="og:url" content="https:\/\/adsform\.example\/missions"/);
+    assert.match(html, /property="og:image" content="https:\/\/adsform\.example\/assets\/adsform-share\.jpg"/);
+    assert.match(html, /rel="icon" href="\/icon\.svg\?v=2"/);
+    assert.doesNotMatch(html, /__ADSFORM_/);
+    const thumbnail = await fetch(origin + '/assets/adsform-share.jpg', { method: 'HEAD' });
+    assert.equal(thumbnail.status, 200);
+    assert.equal(thumbnail.headers.get('content-type'), 'image/jpeg');
+    const admin = await session('admin');
+    const operator = await session('operator');
+    const advertiser = await session('advertiser');
+    const participant = await session('participant');
+    const operatorId = (await state(operator)).user.id;
+    const initialAgency = await session('agency');
+    assert.equal((await state(initialAgency)).user.parent_id, operatorId);
+
+    await post('background', operator, { value: 'lilac' }, 403);
+    await request('background', { cookie: admin, body: { value: 'lilac' }, site: 'https://other.example', expected: 403 });
+    await post('background', admin, { value: 'lilac' });
+    assert.equal((await state()).background, 'lilac');
+    assert.equal((await state()).missions.length, 6);
+    assert.equal(Object.hasOwn((await state()).missions[0], 'answer'), false);
+    for (const name of ['banner-quiz-photo', 'banner-survey', 'banner-partner', 'wallpaper-grove', 'wallpaper-tide', 'wallpaper-lilac', 'wallpaper-sunset', 'wallpaper-night']) {
+      const asset = await fetch(origin + '/assets/' + name + '.webp', { method: 'HEAD' });
+      assert.equal(asset.status, 200, name);
+      assert.equal(asset.headers.get('content-type'), 'image/webp');
+    }
+
+    const inquiry = { subject: '광고 주문 문의', message: '광고 주문 시작일을 설정하는 방법이 궁금합니다.', email: 'local-test@example.test', key: 'test-inquiry' };
+    const ticket = await post('inquiry', undefined, inquiry);
+    assert.deepEqual(await post('inquiry', undefined, inquiry), ticket);
+    await post('inquiry', undefined, { ...inquiry, message: '기존 요청과 다른 내용으로 제출합니다.' }, 409);
+    assert.equal(Object.hasOwn(await state(), 'inquiries'), false);
+    assert.equal(Object.hasOwn(await state(advertiser), 'inquiries'), false);
+    assert.equal((await state(admin)).inquiries.find(item => item.id === ticket.id).reviewed, null);
+    await post('inquiry/review', operator, ticket, 403);
+    await post('inquiry/review', admin, ticket);
+    assert.ok((await state(admin)).inquiries.find(item => item.id === ticket.id).reviewed);
+
+    await post('rates', operator, { rate: '100' }, 403);
+    await post('rates', admin, { rate: '7.5' });
+    await post('rates', admin, { operator_id: operatorId, rate: '12.34' });
+    const credentials = { username: 'qa.agency', password: 'qa-local-example-53' };
+    await post('account', operator, { ...credentials, name: '테스트 하위 대행사', role: 'admin' });
+    const agency = (await request('login', { body: credentials })).cookie;
+    assert.equal((await state(agency)).user.role, 'agency');
+    assert.equal((await state(agency)).user.parent_id, operatorId);
+    assert.equal((await state(operator)).agencies.some(item => item.username === credentials.username), true);
+
+    const amount = 100001;
+    const charge = await post('charge', agency, { amount, key: 'test-charge' });
+    assert.deepEqual(await post('charge', agency, { amount, key: 'test-charge' }), charge);
+    await post('charge/decision', operator, { id: charge.id, action: 'approve' }, 403);
+    assert.equal((await post('charge/decision', admin, { id: charge.id, action: 'approve' })).commission, 12340);
+    await post('charge/decision', admin, { id: charge.id, action: 'approve' }, 409);
+    assert.equal((await state(agency)).balances.credit, amount);
+    await post('rates', admin, { operator_id: operatorId, rate: '' });
+    const operatorState = await state(operator);
+    assert.equal(operatorState.rate, 750);
+    assert.equal(operatorState.balances.revenue, 12340);
+    assert.equal(operatorState.charges.find(item => item.id === charge.id).rate, 1234);
+
+    const date = (await state(agency)).date;
+    const orderData = { kind: 'survey', title: '브랜드 설문 검수', brand: '테스트', details: '설문에 응답해 주세요.', prompt: '이 상품의 장점은 무엇인가요?', goal: '2', start: date, end: date, key: 'test-campaign' };
+    const campaign = await post('campaign', agency, orderData);
+    assert.deepEqual(await post('campaign', agency, orderData), campaign);
+    await post('campaign', agency, { ...orderData, goal: '3' }, 409);
+    assert.equal((await state(agency)).balances.credit, amount - 1800);
+    assert.equal((await state(advertiser)).campaigns.some(item => item.id === campaign.id), false);
+    assert.equal((await state()).missions.some(item => item.id === campaign.id), false);
+    await post('campaign/decision', admin, { id: campaign.id, action: 'approve' });
+    assert.equal((await state()).missions.some(item => item.id === campaign.id), true);
+    await post('mission', agency, { id: campaign.id, response: '광고주는 참여할 수 없습니다.' }, 403);
+    const answer = { id: campaign.id, response: '안내가 분명하고 사용하기 편리합니다.' };
+    await post('mission', participant, answer, 409);
+    const reservation = await post('mission/reserve', participant, { id: campaign.id });
+    assert.deepEqual(await post('mission/reserve', participant, { id: campaign.id }), reservation);
+    assert.equal((await state(agency)).campaigns.find(item => item.id === campaign.id).reserved, 1);
+    assert.equal((await post('mission', participant, answer)).status, 'pending');
+    assert.equal((await post('mission', participant, answer)).status, 'pending');
+    await post('campaign/decision', admin, { id: campaign.id, action: 'close' }, 409);
+    const pending = (await state(admin)).submissions.find(item => item.status === 'pending');
+    await post('mission/review', admin, { id: pending.id, action: 'approve' });
+    await post('mission/review', admin, { id: pending.id, action: 'approve' }, 409);
+    assert.equal((await state(participant)).balances.reward, 300);
+    assert.equal((await state(agency)).campaigns.find(item => item.id === campaign.id).approved, 1);
+    await post('campaign/decision', admin, { id: campaign.id, action: 'close' });
+    assert.equal((await state(agency)).balances.credit, amount - 900);
+    assert.equal((await state(agency)).campaigns.find(item => item.id === campaign.id).returned, 900);
+
+    const quiz = (await state()).missions.find(item => item.kind === 'quiz');
+    assert.deepEqual(quiz.choices, []);
+    await post('mission/reserve', participant, { id: quiz.id });
+    assert.equal((await state(participant)).missions.find(item => item.id === quiz.id).choices.length, 3);
+    assert.equal((await post('mission', participant, { id: quiz.id, response: '0' })).status, 'approved');
+    await post('mission', participant, { id: quiz.id, response: '0' });
+    assert.equal((await state(participant)).balances.reward, 450);
+
+    const second = { username: 'qa.participant', password: 'qa-local-example-71' };
+    await post('account', admin, { ...second, name: '두 번째 참여자', role: 'participant' });
+    const otherParticipant = (await request('login', { body: second })).cookie;
+    const finalSeat = await post('campaign', agency, { ...orderData, goal: '1', key: 'final-seat' });
+    await post('campaign/decision', admin, { id: finalSeat.id, action: 'approve' });
+    const attempts = await Promise.allSettled([participant, otherParticipant].map(cookie => post('mission/reserve', cookie, finalSeat)));
+    assert.equal(attempts.filter(result => result.status === 'fulfilled').length, 1);
+    assert.match(attempts.find(result => result.status === 'rejected').reason.message, /참여 가능 인원이 찼습니다/);
+    const winnerIndex = attempts.findIndex(result => result.status === 'fulfilled');
+    const winner = [participant, otherParticipant][winnerIndex];
+    const waiting = [otherParticipant, participant][winnerIndex];
+    const fixture = new DatabaseSync(db);
+    try {
+      fixture.prepare('UPDATE reservations SET expires=? WHERE campaign_id=?').run(Date.now() - 1, finalSeat.id);
+      await post('mission', winner, { ...answer, id: finalSeat.id }, 409);
+      assert.equal((await state()).missions.find(item => item.id === finalSeat.id).remaining, 1);
+      await post('mission/reserve', waiting, finalSeat);
+      await post('campaign/decision', admin, { id: finalSeat.id, action: 'pause' });
+      await post('mission', waiting, { ...answer, id: finalSeat.id }, 409);
+      await post('campaign/decision', admin, { id: finalSeat.id, action: 'resume' });
+      await post('mission', waiting, { ...answer, id: finalSeat.id }, 409);
+      await post('mission/reserve', waiting, finalSeat);
+      await post('mission', waiting, { ...answer, id: finalSeat.id });
+      const submission = (await state(admin)).submissions.find(item => item.status === 'pending');
+      await post('mission/review', admin, { id: submission.id, action: 'approve' });
+      const completed = (await state(agency)).campaigns.find(item => item.id === finalSeat.id);
+      assert.equal(completed.status, 'closed');
+      assert.equal(completed.reason, '목표 건수 달성');
+
+      const expiring = await post('campaign', agency, { ...orderData, key: 'expire-with-review' });
+      await post('campaign/decision', admin, { id: expiring.id, action: 'approve' });
+      await post('mission/reserve', participant, expiring);
+      await post('mission', participant, { ...answer, id: expiring.id });
+      const past = new Date(Date.parse(date) - 86_400_000).toISOString().slice(0, 10);
+      fixture.prepare('UPDATE campaigns SET start_date=?,end_date=? WHERE id=?').run(past, past, expiring.id);
+      const before = await state(agency);
+      assert.equal(before.campaigns.find(item => item.id === expiring.id).returned, 0);
+      assert.equal((await state()).missions.some(item => item.id === expiring.id), false);
+      const toReview = (await state(admin)).submissions.find(item => item.status === 'pending');
+      await post('mission/review', admin, { id: toReview.id, action: 'approve' });
+      const settled = await state(agency);
+      assert.equal(settled.campaigns.find(item => item.id === expiring.id).reason, '집행 기간 종료');
+      assert.equal(settled.campaigns.find(item => item.id === expiring.id).returned, 900);
+      assert.equal(settled.balances.credit, before.balances.credit + 900);
+      assert.equal((await state(agency)).balances.credit, settled.balances.credit);
+
+      const expiredWithoutReview = await post('campaign', agency, { ...orderData, goal: '1', key: 'expire-no-review' });
+      fixture.prepare('UPDATE campaigns SET start_date=?,end_date=? WHERE id=?').run(past, past, expiredWithoutReview.id);
+      const expired = await state(agency);
+      assert.equal(expired.campaigns.find(item => item.id === expiredWithoutReview.id).returned, 900);
+      assert.equal(expired.balances.credit, settled.balances.credit);
+    } finally {
+      fixture.close();
+    }
+  } finally {
+    if (server.exitCode === null) server.kill();
+    await exit;
+    for (const suffix of ['', '-shm', '-wal']) rmSync(db + suffix, { force: true });
+    rmdirSync(dir);
+  }
+});
