@@ -73,8 +73,19 @@ db.exec(`
     message TEXT NOT NULL, email TEXT NOT NULL DEFAULT '', created TEXT NOT NULL, reviewed TEXT,
     request_key TEXT NOT NULL UNIQUE
   );
+  CREATE TABLE IF NOT EXISTS notices (
+    id INTEGER PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL, audience TEXT NOT NULL DEFAULT 'all',
+    pinned INTEGER NOT NULL DEFAULT 0, author INTEGER REFERENCES users(id), created TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS submissions_created ON submissions(created);
   INSERT OR IGNORE INTO settings VALUES ('background', 'grove'), ('default_rate', '750');
 `);
+for (const [table, column, definition] of [
+  ['campaigns', 'daily_cap', 'INTEGER'],
+  ['campaigns', 'memo', "TEXT NOT NULL DEFAULT ''"]
+]) {
+  if (!db.prepare(`PRAGMA table_info(${table})`).all().some(item => item.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
 
 const get = (sql, ...params) => db.prepare(sql).get(...params);
 const all = (sql, ...params) => db.prepare(sql).all(...params);
@@ -89,6 +100,8 @@ const clean = user => user && ({ id: user.id, name: user.name, username: user.us
 const passHash = (password, salt = randomBytes(16).toString('hex')) => `${salt}:${scryptSync(password, salt, 64).toString('hex')}`;
 const checkPass = (password, saved) => timingSafeEqual(Buffer.from(passHash(password, saved.split(':')[0])), Buffer.from(saved));
 const count = (campaign, onlyApproved = false) => get(`SELECT COUNT(*) AS total FROM submissions WHERE campaign_id=? AND status ${onlyApproved ? "='approved'" : "IN ('approved','pending')"}`, campaign).total;
+const dayStart = (day = dateKst()) => new Date(Date.parse(day + 'T00:00:00+09:00')).toISOString();
+const countToday = campaign => get("SELECT COUNT(*) AS total FROM submissions WHERE campaign_id=? AND status IN ('approved','pending') AND created>=?", campaign, dayStart()).total;
 const countReserved = (campaign, time) => get('SELECT COUNT(*) AS total FROM reservations WHERE campaign_id=? AND expires>?', campaign, time).total;
 
 function transaction(work) {
@@ -128,6 +141,121 @@ if (demo && !get("SELECT id FROM users WHERE username='demo.admin'")) {
       const { cost, reward } = products[kind];
       insert.run(title, brand, kind, details, prompt, JSON.stringify(choices), answer, 60, cost, reward, dateKst(), '2099-12-31', now());
     }
+  });
+}
+const shiftDay = (day, offset) => new Date(Date.parse(day + 'T00:00:00Z') + offset * 86_400_000).toISOString().slice(0, 10);
+const kstStamp = (day, minutes) => new Date(Date.parse(day + 'T00:00:00+09:00') + minutes * 60_000).toISOString();
+
+function seedDemoHistory() {
+  let seed = 20261110;
+  const random = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  const pick = (min, max) => min + Math.floor(random() * (max - min + 1));
+  const today = dateKst();
+  const id = name => get('SELECT id FROM users WHERE username=?', name).id;
+  const [admin, operator, agency, advertiser, participant] = ['demo.admin', 'demo.operator', 'demo.agency', 'demo.advertiser', 'demo.participant'].map(id);
+  const shared = passHash(randomBytes(24).toString('hex'));
+  run("UPDATE ledger SET created=? WHERE kind='opening'", kstStamp(shiftDay(today, -60), 540));
+  const nicknames = ['하늘', '도윤', '서연', '민준', '지우', '하은', '시우', '수아', '예준', '지안', '은우', '서윤', '유준', '채원', '건우', '다인', '주원', '소율', '현우', '아린'];
+  const people = [];
+  const addPerson = db.prepare("INSERT INTO users(username,name,password,role,is_demo) VALUES (?,?,?,'participant',1)");
+  for (let i = 1; i <= 180; i++) {
+    people.push(Number(addPerson.run(`demo.u${String(i).padStart(3, '0')}`, `${nicknames[i % nicknames.length]}${String(i).padStart(3, '0')}`, shared).lastInsertRowid));
+  }
+  const ledgerAt = db.prepare('INSERT INTO ledger(user_id,wallet,amount,kind,ref,created) VALUES (?,?,?,?,?,?)');
+  const auditAt = db.prepare('INSERT INTO audit(actor,action,subject,detail,created) VALUES (?,?,?,?,?)');
+  const chargeAt = (user, amount, day, approved = true, operatorId = null) => {
+    const rate = operatorId ? Number(setting('default_rate')) : 0;
+    const commission = approved ? Math.floor(amount * rate / 10000) : 0;
+    const charge = Number(run(`INSERT INTO charges(user_id,amount,status,created,decided,operator_id,rate,commission,request_key) VALUES (?,?,?,?,?,?,?,?,?)`,
+      user, amount, approved ? 'approved' : 'pending', kstStamp(day, 560), approved ? kstStamp(day, 640) : null, approved ? operatorId : null, approved ? rate : 0, commission, `seed-${user}-${day}-${amount}`).lastInsertRowid);
+    if (!approved) return;
+    ledgerAt.run(user, 'credit', amount, 'charge', String(charge), kstStamp(day, 640));
+    if (commission) ledgerAt.run(operatorId, 'revenue', commission, 'commission', String(charge), kstStamp(day, 640));
+    auditAt.run(admin, '충전 승인', String(charge), `${amount.toLocaleString('ko-KR')}원${commission ? ` · 실행사 수익 ${commission.toLocaleString('ko-KR')}원` : ''}`, kstStamp(day, 640));
+  };
+  chargeAt(advertiser, 500000, shiftDay(today, -45));
+  chargeAt(advertiser, 300000, shiftDay(today, -9));
+  chargeAt(agency, 400000, shiftDay(today, -15), true, operator);
+  chargeAt(agency, 200000, shiftDay(today, -3), true, operator);
+  chargeAt(agency, 100000, today, false);
+  chargeAt(operator, 200000, shiftDay(today, -6));
+
+  const plans = [
+    { owner: advertiser, title: '가을 시즌 브랜드 퀴즈', mine: ['approved', -4], brand: '오후의 상점', kind: 'quiz', goal: 300, from: -13, to: 16, status: 'active', cap: 40, daily: [6, 14],
+      details: '오후의 상점 가을 시즌 컬렉션 이야기를 읽고 퀴즈를 풀어보세요.', prompt: '오후의 상점 가을 컬렉션의 대표 소재는 무엇일까요?', choices: ['리넨', '가죽', '네오프렌'], memo: '인스타그램 이벤트와 동시 진행' },
+    { owner: advertiser, title: '매장 방문 경험 설문', mine: ['pending', 0], brand: '오후의 상점', kind: 'survey', goal: 150, from: -10, to: 20, status: 'active', cap: 20, daily: [3, 8],
+      details: '최근 오프라인 매장을 방문한 경험을 알려주세요.', prompt: '매장에서 가장 만족스러웠던 점과 아쉬웠던 점은 무엇인가요?', memo: '응답 내용은 매장 리뉴얼 회의 자료로 활용' },
+    { owner: advertiser, title: '여름 신메뉴 인지도 퀴즈', mine: ['approved', -30], brand: '오후의 상점', kind: 'quiz', goal: 120, from: -40, to: -21, status: 'closed', reason: '목표 건수 달성', daily: [6, 9],
+      details: '여름 시즌 음료 신메뉴에 관한 퀴즈입니다.', prompt: '여름 신메뉴에 사용된 과일은 무엇일까요?', choices: ['청귤', '사과', '배'] },
+    { owner: advertiser, title: '연말 선물 선호도 조사', brand: '오후의 상점', kind: 'survey', goal: 200, from: 3, to: 30, status: 'pending', daily: [0, 0],
+      details: '연말 선물로 받고 싶은 생활용품을 알려주세요.', prompt: '올해 연말에 받고 싶은 선물과 그 이유를 적어주세요.' },
+    { owner: agency, title: '친환경 리필 스테이션 퀴즈', mine: ['rejected', -2], brand: '그린리필', kind: 'quiz', goal: 200, from: -7, to: 14, status: 'active', cap: 30, daily: [5, 12],
+      details: '동네 리필 스테이션 이용 방법을 알아보는 퀴즈입니다.', prompt: '리필 스테이션을 이용할 때 꼭 챙겨야 하는 것은?', choices: ['세척한 빈 용기', '새 플라스틱 병', '종이컵'], memo: '그린리필 1차 캠페인' },
+    { owner: agency, title: '반려동물 용품 구매 기준 설문', mine: ['approved', -8], brand: '펫앤홈', kind: 'survey', goal: 80, from: -12, to: 10, status: 'paused', daily: [2, 4],
+      details: '반려동물 용품을 고르는 기준을 알려주세요.', prompt: '반려동물 용품을 살 때 가장 먼저 확인하는 것은 무엇인가요?' },
+    { owner: operator, title: '그린웨이 브랜드 스토리 퀴즈', brand: '그린웨이', kind: 'quiz', goal: 100, from: -5, to: 25, status: 'active', daily: [4, 9],
+      details: '그린웨이가 걸어온 친환경 포장 이야기를 확인해 보세요.', prompt: '그린웨이가 처음 선보인 포장재는 무엇일까요?', choices: ['재생지 완충재', '스티로폼', '비닐 에어캡'] }
+  ];
+  const survey = ['직원분들이 친절하게 안내해 주셔서 좋았고, 주말에는 대기 시간이 조금 길었습니다.', '진열이 깔끔해서 상품을 찾기 쉬웠어요. 가격표가 더 크게 보이면 좋겠습니다.',
+    '매장 분위기가 편안해서 오래 머물렀습니다. 주차 공간이 부족한 점이 아쉬웠어요.', '신상품을 직접 만져볼 수 있어 좋았습니다. 계산대가 하나만 열려 있었어요.',
+    '포장이 꼼꼼하고 선물용으로 좋았습니다. 영업시간이 조금 더 길었으면 합니다.', '재고가 넉넉해서 원하는 색상을 바로 살 수 있었어요. 화장실 안내가 부족했습니다.'];
+  for (const plan of plans) {
+    const { cost, reward } = products[plan.kind];
+    const start = shiftDay(today, plan.from);
+    const end = shiftDay(today, plan.to);
+    const ordered = kstStamp(shiftDay(start < today ? start : today, start < today ? -2 : -1), 600);
+    const campaign = Number(run(`INSERT INTO campaigns(owner_id,title,brand,kind,details,prompt,choices,answer,goal,cost,reward,start_date,end_date,status,reason,created,daily_cap,memo)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, plan.owner, plan.title, plan.brand, plan.kind, plan.details, plan.prompt, JSON.stringify(plan.choices || []),
+      plan.kind === 'quiz' ? 0 : null, plan.goal, cost, reward, start, end, plan.status, plan.reason || '', ordered, plan.cap ?? null, plan.memo || '').lastInsertRowid);
+    ledgerAt.run(plan.owner, 'credit', -cost * plan.goal, 'reserve', String(campaign), ordered);
+    auditAt.run(plan.owner, '광고 주문 접수', String(campaign), '', ordered);
+    if (plan.status !== 'pending') auditAt.run(admin, '캠페인 상태 변경', String(campaign), 'active', kstStamp(shiftDay(start, -1), 620));
+    if (plan.mine) {
+      const stamp = kstStamp(shiftDay(today, plan.mine[1]), 690);
+      const quiz = plan.kind === 'quiz';
+      const status = plan.mine[0];
+      const submission = Number(run('INSERT INTO submissions(campaign_id,user_id,response,status,reason,created) VALUES (?,?,?,?,?,?)', campaign, participant,
+        quiz ? plan.choices[status === 'approved' ? 0 : 1] : '가격이 합리적이고 직원 응대가 친절했습니다. 매장 위치 안내가 더 있으면 좋겠어요.', status,
+        status === 'rejected' ? '퀴즈 정답과 일치하지 않습니다.' : '', stamp).lastInsertRowid);
+      if (status === 'approved') ledgerAt.run(participant, 'reward', reward, 'mission', String(submission), stamp);
+    }
+    const pool = [...people].sort(() => random() - 0.5);
+    let approved = plan.mine?.[0] === 'approved' ? 1 : 0;
+    const last = plan.status === 'closed' ? plan.to : 0;
+    for (let offset = plan.from; offset <= last && pool.length; offset++) {
+      const day = shiftDay(today, offset);
+      const volume = Math.min(pick(...plan.daily), plan.cap ?? Infinity, pool.length);
+      for (let n = 0; n < volume && approved < plan.goal; n++) {
+        const user = pool.pop();
+        const stamp = offset === 0 ? new Date(Date.now() - pick(5, 600) * 60_000).toISOString() : kstStamp(day, pick(420, 1380));
+        let status; let response; let reason = '';
+        if (plan.kind === 'quiz') {
+          const choice = random() < 0.86 ? 0 : pick(1, 2);
+          response = plan.choices[choice];
+          status = choice === 0 ? 'approved' : 'rejected';
+          if (status === 'rejected') reason = '퀴즈 정답과 일치하지 않습니다.';
+        } else {
+          response = survey[pick(0, survey.length - 1)];
+          status = offset >= -1 && plan.status === 'active' ? 'pending' : random() < 0.92 ? 'approved' : 'rejected';
+          if (status === 'rejected') reason = '질문과 관련 없는 응답입니다.';
+        }
+        const submission = Number(run('INSERT INTO submissions(campaign_id,user_id,response,status,reason,created) VALUES (?,?,?,?,?,?)', campaign, user, response, status, reason, stamp).lastInsertRowid);
+        if (status === 'approved') {
+          approved++;
+          ledgerAt.run(user, 'reward', reward, 'mission', String(submission), stamp);
+        }
+      }
+    }
+  }
+  run("INSERT INTO notices(title,body,audience,pinned,author,created) VALUES (?,?,?,?,?,?)", '애즈폼 정식 오픈 안내', '브랜드 퀴즈·설문 캠페인 주문과 실시간 리포트를 이용할 수 있습니다. 문의는 우측 하단 문의하기를 이용해 주세요.', 'all', 1, admin, kstStamp(shiftDay(today, -14), 540));
+  run("INSERT INTO notices(title,body,audience,pinned,author,created) VALUES (?,?,?,?,?,?)", '일일 모집 한도 기능 추가', '주문서에서 하루 최대 승인 건수를 정하면 캠페인 기간 동안 참여가 고르게 분배됩니다.', 'business', 0, admin, kstStamp(shiftDay(today, -2), 600));
+  run("INSERT INTO notices(title,body,audience,pinned,author,created) VALUES (?,?,?,?,?,?)", '설문 검수 기준 안내', '질문과 관련 없는 답변, 의미 없는 반복 문자는 반려될 수 있어요. 성의 있는 답변을 남겨 주세요.', 'participant', 0, admin, kstStamp(shiftDay(today, -1), 600));
+}
+
+if (demo && !get("SELECT value FROM settings WHERE key='demo_history'") && get("SELECT id FROM users WHERE username='demo.admin'")) {
+  transaction(() => {
+    seedDemoHistory();
+    run("INSERT INTO settings VALUES ('demo_history', ?)", dateKst());
   });
 }
 if (!demo && !get("SELECT id FROM users WHERE role='admin' AND is_demo=0")) {
@@ -229,53 +357,104 @@ function newAccount(actor, body) {
 function publicCampaigns(user) {
   const today = dateKst();
   const time = Date.now();
-  const rows = all(`SELECT c.id,c.title,c.brand,c.kind,c.details,c.prompt,c.choices,c.reward,c.goal,c.start_date,c.end_date,
+  const rows = all(`SELECT c.id,c.title,c.brand,c.kind,c.details,c.prompt,c.choices,c.reward,c.goal,c.start_date,c.end_date,c.daily_cap,
     (SELECT COUNT(*) FROM submissions WHERE campaign_id=c.id AND status IN ('pending','approved')) AS used,
+    (SELECT COUNT(*) FROM submissions WHERE campaign_id=c.id AND status IN ('pending','approved') AND created>=?) AS usedToday,
     (SELECT status FROM submissions WHERE campaign_id=c.id AND user_id=?) AS mine,
     (SELECT COUNT(*) FROM reservations WHERE campaign_id=c.id AND expires>?) AS reserved,
     (SELECT expires FROM reservations WHERE campaign_id=c.id AND user_id=? AND expires>?) AS reservedUntil
     FROM campaigns c WHERE c.status='active' AND c.start_date<=? AND c.end_date>=?
-      AND (? OR c.owner_id IS NOT NULL) ORDER BY c.id DESC`, user?.id || 0, time, user?.id || 0, time, today, today, Number(demo));
-  return rows.map(row => ({
+      AND (? OR c.owner_id IS NOT NULL) ORDER BY c.id DESC`, dayStart(today), user?.id || 0, time, user?.id || 0, time, today, today, Number(demo));
+  return rows.map(({ usedToday, ...row }) => ({
     ...row, prompt: row.reservedUntil ? row.prompt : '', choices: row.reservedUntil ? JSON.parse(row.choices) : [],
-    remaining: Math.max(0, row.goal - row.used - row.reserved)
+    remaining: Math.max(0, Math.min(row.goal - row.used, row.daily_cap ? row.daily_cap - usedToday : Infinity) - row.reserved)
   }));
 }
+
+const recentDays = n => Array.from({ length: n }, (_, i) => shiftDay(dateKst(), i - n + 1));
+
+function campaignTrend(where, params, n = 31) {
+  const rows = all(`SELECT date(s.created,'+9 hours') AS day, SUM(s.status='approved') AS approved, SUM(s.status='pending') AS pending,
+    SUM(s.status='rejected') AS rejected, SUM(CASE WHEN s.status='approved' THEN c.cost ELSE 0 END) AS spend,
+    SUM(CASE WHEN s.status='approved' THEN c.reward ELSE 0 END) AS rewards
+    FROM submissions s JOIN campaigns c ON c.id=s.campaign_id WHERE s.created>=? AND (${where}) GROUP BY day`, dayStart(shiftDay(dateKst(), -n + 1)), ...params);
+  const map = new Map(rows.map(row => [row.day, row]));
+  return recentDays(n).map(day => ({ day, approved: 0, pending: 0, rejected: 0, spend: 0, rewards: 0, ...map.get(day) }));
+}
+
+function dailySum(sql, params, n = 31) {
+  const map = new Map(all(sql, dayStart(shiftDay(dateKst(), -n + 1)), ...params).map(row => [row.day, row.total]));
+  return recentDays(n).map(day => ({ day, total: map.get(day) || 0 }));
+}
+
+const audienceFor = user => user.role === 'admin' ? ['all', 'business', 'participant'] : user.role === 'participant' ? ['all', 'participant'] : ['all', 'business'];
 
 function summary(user) {
   expireCampaigns();
   const result = { user: clean(user), demo, background: setting('background'), products, missions: publicCampaigns(user), date: dateKst(), reservationMinutes };
   if (!user) return result;
-  result.ledger = all('SELECT wallet,amount,kind,ref,created FROM ledger WHERE user_id=? ORDER BY id DESC LIMIT 100', user.id);
+  result.ledger = all('SELECT wallet,amount,kind,ref,created FROM ledger WHERE user_id=? ORDER BY created DESC, id DESC LIMIT 100', user.id);
   result.balances = Object.fromEntries(['credit', 'revenue', 'reward'].map(wallet => [wallet, balance(user.id, wallet)]));
+  const audience = audienceFor(user);
+  result.notices = all(`SELECT id,title,body,audience,pinned,created FROM notices WHERE audience IN (${audience.map(() => '?').join(',')})
+    ORDER BY pinned DESC, id DESC LIMIT 20`, ...audience);
   if (user.role === 'participant') {
-    result.submissions = all('SELECT s.id,s.status,s.reason,s.created,c.title,c.reward FROM submissions s JOIN campaigns c ON s.campaign_id=c.id WHERE s.user_id=? ORDER BY s.id DESC', user.id);
+    result.submissions = all('SELECT s.id,s.status,s.reason,s.created,c.title,c.kind,c.brand,c.reward FROM submissions s JOIN campaigns c ON s.campaign_id=c.id WHERE s.user_id=? ORDER BY s.created DESC, s.id DESC', user.id);
+    result.trend = dailySum(`SELECT date(created,'+9 hours') AS day, SUM(amount) AS total FROM ledger
+      WHERE created>=? AND user_id=? AND wallet='reward' AND amount>0 GROUP BY day`, [user.id], 14);
   }
   if (partners.includes(user.role) || user.role === 'admin') {
     const admin = user.role === 'admin';
-    result.campaigns = all(`SELECT c.id,c.title,c.brand,c.kind,c.details,c.prompt,c.choices,c.answer,c.goal,c.cost,c.reward,c.start_date,c.end_date,c.status,c.reason,c.created,u.name AS owner,
+    const scope = admin ? '(c.owner_id IS NOT NULL OR ?)' : 'c.owner_id=?';
+    const scopeParam = admin ? Number(demo) : user.id;
+    result.campaigns = all(`SELECT c.id,c.title,c.brand,c.kind,c.details,c.prompt,c.choices,c.answer,c.goal,c.cost,c.reward,c.start_date,c.end_date,c.status,c.reason,c.created,
+      c.daily_cap,c.memo,c.owner_id,u.name AS owner,
       (SELECT COUNT(*) FROM submissions WHERE campaign_id=c.id AND status='approved') AS approved,
       (SELECT COUNT(*) FROM submissions WHERE campaign_id=c.id AND status='pending') AS reviewing,
+      (SELECT COUNT(*) FROM submissions WHERE campaign_id=c.id AND status='rejected') AS rejected,
+      (SELECT COUNT(*) FROM submissions WHERE campaign_id=c.id AND status IN ('approved','pending') AND created>=?) AS today,
       (SELECT COUNT(*) FROM reservations WHERE campaign_id=c.id AND expires>?) AS reserved,
       COALESCE((SELECT amount FROM ledger WHERE user_id=c.owner_id AND wallet='credit' AND kind='release' AND ref=CAST(c.id AS TEXT)),0) AS returned
-      FROM campaigns c LEFT JOIN users u ON c.owner_id=u.id WHERE (? AND (c.owner_id IS NOT NULL OR ?)) OR c.owner_id=? ORDER BY c.id DESC`, Date.now(), Number(admin), Number(demo), user.id);
-    result.charges = all(`SELECT c.id,c.amount,c.status,c.created,c.decided,c.rate,c.commission,u.name AS owner,o.name AS operator
+      FROM campaigns c LEFT JOIN users u ON c.owner_id=u.id WHERE ${scope} ORDER BY c.id DESC`, dayStart(), Date.now(), scopeParam);
+    result.charges = all(`SELECT c.id,c.amount,c.status,c.created,c.decided,c.rate,c.commission,u.name AS owner,u.role AS ownerRole,o.name AS operator
       FROM charges c JOIN users u ON c.user_id=u.id LEFT JOIN users o ON c.operator_id=o.id
       WHERE ? OR c.user_id=? OR c.operator_id=? ORDER BY c.id DESC`, Number(admin), user.id, user.role === 'operator' ? user.id : -1);
+    result.trend = campaignTrend(scope, [scopeParam]);
   }
   if (user.role === 'operator') {
-    result.agencies = all("SELECT id,name,username FROM users WHERE parent_id=? AND role='agency' ORDER BY id DESC", user.id);
+    result.agencies = all(`SELECT u.id,u.name,u.username,
+      COALESCE((SELECT SUM(amount) FROM charges WHERE user_id=u.id AND status='approved'),0) AS charged,
+      COALESCE((SELECT SUM(commission) FROM charges WHERE user_id=u.id AND status='approved' AND operator_id=?),0) AS commission,
+      (SELECT COUNT(*) FROM charges WHERE user_id=u.id AND status='pending') AS pendingCharges,
+      (SELECT COUNT(*) FROM campaigns WHERE owner_id=u.id) AS campaigns,
+      (SELECT COUNT(*) FROM campaigns WHERE owner_id=u.id AND status='active') AS activeCampaigns,
+      (SELECT MAX(decided) FROM charges WHERE user_id=u.id AND status='approved') AS lastCharge
+      FROM users u WHERE u.parent_id=? AND u.role='agency' ORDER BY u.id DESC`, user.id, user.id);
     result.rate = user.rate ?? Number(setting('default_rate'));
+    result.revenueTrend = dailySum(`SELECT date(created,'+9 hours') AS day, SUM(amount) AS total FROM ledger
+      WHERE created>=? AND user_id=? AND wallet='revenue' GROUP BY day`, [user.id], 31);
   }
   if (user.role === 'admin') {
+    const visible = 'u.username NOT GLOB \'demo.u[0-9]*\'';
     result.defaultRate = Number(setting('default_rate'));
-    result.accounts = all('SELECT u.id,u.name,u.username,u.role,u.rate,p.name AS parent FROM users u LEFT JOIN users p ON u.parent_id=p.id WHERE ? OR u.is_demo=0 ORDER BY u.id DESC', Number(demo));
-    result.submissions = all(`SELECT s.id,s.status,s.created,s.response,c.title,c.reward,u.name FROM submissions s
+    result.accounts = all(`SELECT u.id,u.name,u.username,u.role,u.rate,p.name AS parent,
+      COALESCE((SELECT SUM(amount) FROM ledger WHERE user_id=u.id AND wallet='credit'),0) AS credit
+      FROM users u LEFT JOIN users p ON u.parent_id=p.id WHERE (? OR u.is_demo=0) AND ${visible} ORDER BY u.id DESC`, Number(demo));
+    result.roleCounts = Object.fromEntries(all('SELECT role, COUNT(*) AS total FROM users WHERE ? OR is_demo=0 GROUP BY role', Number(demo)).map(row => [row.role, row.total]));
+    result.submissions = all(`SELECT s.id,s.status,s.created,s.response,s.reason,c.id AS campaign,c.title,c.kind,c.reward,u.name FROM submissions s
       JOIN campaigns c ON c.id=s.campaign_id JOIN users u ON u.id=s.user_id
       WHERE ? OR u.is_demo=0 ORDER BY (s.status='pending') DESC, s.id DESC LIMIT 100`, Number(demo));
-    result.audit = all('SELECT a.action,a.subject,a.detail,a.created,u.name FROM audit a LEFT JOIN users u ON u.id=a.actor ORDER BY a.id DESC LIMIT 50');
+    result.audit = all('SELECT a.action,a.subject,a.detail,a.created,u.name FROM audit a LEFT JOIN users u ON u.id=a.actor ORDER BY a.created DESC, a.id DESC LIMIT 50');
     result.inquiries = all(`SELECT i.id,i.subject,i.message,i.email,i.created,i.reviewed,u.name AS sender
       FROM inquiries i LEFT JOIN users u ON u.id=i.user_id ORDER BY i.reviewed IS NOT NULL, i.id DESC LIMIT 100`);
+    result.chargeTrend = dailySum(`SELECT date(decided,'+9 hours') AS day, SUM(amount) AS total FROM charges
+      WHERE status='approved' AND decided>=? GROUP BY day`, [], 31);
+    result.kpi = {
+      charged: get("SELECT COALESCE(SUM(amount),0) AS total FROM charges WHERE status='approved'").total,
+      commission: get("SELECT COALESCE(SUM(commission),0) AS total FROM charges WHERE status='approved'").total,
+      rewards: get("SELECT COALESCE(SUM(amount),0) AS total FROM ledger WHERE wallet='reward' AND amount>0").total,
+      activeParticipants: get(`SELECT COUNT(DISTINCT user_id) AS total FROM submissions WHERE created>=?`, dayStart(shiftDay(dateKst(), -13))).total
+    };
     result.adminCounts = {
       pendingSubmissions: get(`SELECT COUNT(*) AS total FROM submissions s JOIN users u ON u.id=s.user_id
         WHERE s.status='pending' AND (? OR u.is_demo=0)`, Number(demo)).total,
@@ -283,6 +462,67 @@ function summary(user) {
     };
   }
   return result;
+}
+
+function report(user, id) {
+  assert(user, '로그인이 필요합니다.', 401);
+  const campaign = get('SELECT * FROM campaigns WHERE id=?', id);
+  assert(campaign && (user.role === 'admin' || campaign.owner_id === user.id), '리포트를 볼 수 없는 캠페인입니다.', 404);
+  const start = campaign.start_date;
+  const last = campaign.end_date < dateKst() ? campaign.end_date : dateKst();
+  const span = Math.max(1, Math.min(60, Math.round((Date.parse(last) - Date.parse(start)) / 86_400_000) + 1));
+  const rows = all(`SELECT date(created,'+9 hours') AS day, SUM(status='approved') AS approved, SUM(status='pending') AS pending, SUM(status='rejected') AS rejected
+    FROM submissions WHERE campaign_id=? GROUP BY day`, id);
+  const map = new Map(rows.map(row => [row.day, row]));
+  const daily = Array.from({ length: span }, (_, i) => shiftDay(last, i - span + 1)).map(day => ({ day, approved: 0, pending: 0, rejected: 0, ...map.get(day) }));
+  const hours = all(`SELECT CAST(strftime('%H', created, '+9 hours') AS INTEGER) AS hour, COUNT(*) AS total FROM submissions WHERE campaign_id=? GROUP BY hour`, id);
+  const choices = campaign.kind === 'quiz'
+    ? JSON.parse(campaign.choices).map((choice, index) => ({ choice, correct: index === campaign.answer,
+      total: get('SELECT COUNT(*) AS total FROM submissions WHERE campaign_id=? AND response=?', id, choice).total }))
+    : [];
+  const responses = campaign.kind === 'survey'
+    ? all(`SELECT s.id,s.response,s.status,s.created,u.name FROM submissions s JOIN users u ON u.id=s.user_id WHERE s.campaign_id=? ORDER BY s.id DESC LIMIT 60`, id)
+      .map(({ name, ...row }) => ({ ...row, who: user.role === 'admin' ? name : `${[...name][0]}${'*'.repeat(Math.max(1, [...name].length - 1))}` }))
+    : [];
+  const history = all(`SELECT a.action,a.detail,a.created,u.name FROM audit a LEFT JOIN users u ON u.id=a.actor
+    WHERE a.subject=? AND a.action IN ('광고 주문 접수','캠페인 상태 변경','캠페인 종료·정산','메모 수정') ORDER BY a.created`, String(id));
+  return { id, daily, hours: Array.from({ length: 24 }, (_, hour) => hours.find(item => item.hour === hour)?.total || 0), choices, responses, history };
+}
+
+function saveMemo(user, body) {
+  role(user, [...partners, 'admin']);
+  const id = int(body.id, '캠페인 번호', 1, 1e9);
+  const memo = str(body.memo ?? '', '메모', 300, 0);
+  return transaction(() => {
+    const campaign = get('SELECT owner_id FROM campaigns WHERE id=?', id);
+    assert(campaign && (user.role === 'admin' || campaign.owner_id === user.id), '캠페인을 찾을 수 없습니다.', 404);
+    run('UPDATE campaigns SET memo=? WHERE id=?', memo, id);
+    audit(user.id, '메모 수정', id);
+    return {};
+  });
+}
+
+function createNotice(user, body) {
+  role(user, ['admin']);
+  const title = str(body.title, '공지 제목', 80, 2);
+  const text = str(body.body, '공지 내용', 1000, 2);
+  assert(['all', 'business', 'participant'].includes(body.audience), '공지 대상을 선택해 주세요.');
+  return transaction(() => {
+    const id = Number(run('INSERT INTO notices(title,body,audience,pinned,author,created) VALUES (?,?,?,?,?,?)', title, text, body.audience, body.pinned ? 1 : 0, user.id, now()).lastInsertRowid);
+    audit(user.id, '공지 등록', id, title);
+    return { id };
+  });
+}
+
+function deleteNotice(user, body) {
+  role(user, ['admin']);
+  const id = int(body.id, '공지 번호', 1, 1e9);
+  return transaction(() => {
+    assert(get('SELECT id FROM notices WHERE id=?', id), '공지를 찾을 수 없습니다.', 404);
+    run('DELETE FROM notices WHERE id=?', id);
+    audit(user.id, '공지 삭제', id);
+    return {};
+  });
 }
 
 function requestCharge(user, body) {
@@ -321,7 +561,7 @@ function decideCharge(user, body) {
     run("UPDATE charges SET status='approved',decided=?,operator_id=?,rate=?,commission=? WHERE id=?", now(), operator?.id ?? null, applied, commission, id);
     entry(charge.user_id, 'credit', charge.amount, 'charge', id);
     if (commission > 0) entry(operator.id, 'revenue', commission, 'commission', id);
-    audit(user.id, '충전 승인', id, `${charge.amount}원 · 실행사 수익 ${commission}원`);
+    audit(user.id, '충전 승인', id, `${charge.amount.toLocaleString('ko-KR')}원 · 실행사 수익 ${commission.toLocaleString('ko-KR')}원`);
     return { commission };
   });
 }
@@ -342,18 +582,24 @@ function createCampaign(user, body) {
   const start = date(body.start);
   const end = date(body.end);
   assert(start >= dateKst() && end >= start, '시작일과 종료일을 확인해 주세요.');
+  const cap = body.daily_cap === undefined || body.daily_cap === '' || body.daily_cap === '0' ? null : int(body.daily_cap, '일일 한도', 1, goal);
+  if (cap) {
+    const days = Math.round((Date.parse(end) - Date.parse(start)) / 86_400_000) + 1;
+    assert(cap * days >= goal, `일일 한도 ${cap}건으로는 ${days}일 동안 목표 ${goal}건을 채울 수 없어요. 한도나 기간을 늘려 주세요.`);
+  }
+  const memo = str(body.memo ?? '', '메모', 300, 0);
   const key = str(body.key, '요청 키', 64);
   return transaction(() => {
     const existing = get('SELECT * FROM campaigns WHERE owner_id=? AND request_key=?', user.id, key);
     if (existing) {
       assert(existing.kind === kind && existing.title === title && existing.brand === brand && existing.details === details &&
         existing.prompt === prompt && existing.choices === JSON.stringify(choices) && existing.answer === answer &&
-        existing.goal === goal && existing.start_date === start && existing.end_date === end, '이미 접수된 요청입니다. 새 주문 화면에서 다시 작성해 주세요.', 409);
+        existing.goal === goal && existing.start_date === start && existing.end_date === end && existing.daily_cap === cap, '이미 접수된 요청입니다. 새 주문 화면에서 다시 작성해 주세요.', 409);
       return { id: existing.id };
     }
     assert(balance(user.id, 'credit') >= cost * goal, '광고 잔액이 부족합니다. 먼저 충전을 신청해 주세요.', 409);
-    const id = Number(run(`INSERT INTO campaigns(owner_id,title,brand,kind,details,prompt,choices,answer,goal,cost,reward,start_date,end_date,status,created,request_key)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?,?)`, user.id, title, brand, kind, details, prompt, JSON.stringify(choices), answer, goal, cost, reward, start, end, now(), key).lastInsertRowid);
+    const id = Number(run(`INSERT INTO campaigns(owner_id,title,brand,kind,details,prompt,choices,answer,goal,cost,reward,start_date,end_date,status,created,request_key,daily_cap,memo)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?,?,?,?)`, user.id, title, brand, kind, details, prompt, JSON.stringify(choices), answer, goal, cost, reward, start, end, now(), key, cap, memo).lastInsertRowid);
     entry(user.id, 'credit', -(cost * goal), 'reserve', id);
     audit(user.id, '광고 주문 접수', id);
     return { id };
@@ -439,6 +685,9 @@ function reserveMission(user, body) {
     const prior = get('SELECT expires FROM reservations WHERE campaign_id=? AND user_id=?', id, user.id);
     if (prior) return { expires: prior.expires };
     assert(count(id) + countReserved(id, time) < campaign.goal, '참여 가능 인원이 찼습니다. 잠시 후 다시 확인해 주세요.', 409);
+    if (campaign.daily_cap) {
+      assert(countToday(id) + countReserved(id, time) < campaign.daily_cap, '오늘 모집 인원이 모두 찼어요. 내일 다시 참여해 주세요.', 409);
+    }
     const deadline = Date.parse(campaign.end_date + 'T23:59:59.999+09:00') + 1;
     const expires = Math.min(time + reservationMinutes * 60_000, deadline);
     assert(expires > time, '미션 기간이 종료되었습니다.', 409);
@@ -541,6 +790,9 @@ const routes = {
   '/api/mission': (_req, _res, user, body) => submitMission(user, body),
   '/api/mission/review': (_req, _res, user, body) => reviewMission(user, body),
   '/api/inquiry': (_req, _res, user, body) => createInquiry(user, body),
+  '/api/campaign/memo': (_req, _res, user, body) => saveMemo(user, body),
+  '/api/notice': (_req, _res, user, body) => createNotice(user, body),
+  '/api/notice/delete': (_req, _res, user, body) => deleteNotice(user, body),
   '/api/inquiry/review': (_req, _res, user, body) => reviewInquiry(user, body),
   '/api/background': (_req, _res, user, body) => {
     role(user, ['admin']);
@@ -607,6 +859,7 @@ const server = createServer(async (req, res) => {
     assert([ `127.0.0.1:${port}`, `localhost:${port}` ].includes(host), '로컬 주소로 접속해 주세요.', 403);
     const url = new URL(req.url, `http://${host}`);
     if (url.pathname === '/api/state' && req.method === 'GET') return json(res, 200, summary(session(req)));
+    if (url.pathname === '/api/report' && req.method === 'GET') return json(res, 200, report(session(req), int(url.searchParams.get('id') || '', '캠페인 번호', 1, 1e9)));
     if (req.method === 'POST' && Object.hasOwn(routes, url.pathname)) {
       assert(req.headers.origin === `http://${host}`, '같은 사이트에서 요청해 주세요.', 403);
       const body = await payload(req);
