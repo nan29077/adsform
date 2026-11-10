@@ -55,7 +55,7 @@ test('로컬 역할 권한, 대행사 수익, 광고 집행과 보상', { timeou
     await request('background', { cookie: admin, body: { value: 'lilac' }, site: 'https://other.example', expected: 403 });
     await post('background', admin, { value: 'lilac' });
     assert.equal((await state()).background, 'lilac');
-    assert.equal((await state()).missions.length, 6);
+    assert.equal((await state()).missions.length, 10);
     assert.equal(Object.hasOwn((await state()).missions[0], 'answer'), false);
     for (const name of ['banner-quiz-photo', 'banner-survey', 'banner-partner', 'wallpaper-grove', 'wallpaper-tide', 'wallpaper-lilac', 'wallpaper-sunset', 'wallpaper-night']) {
       const asset = await fetch(origin + '/assets/' + name + '.webp', { method: 'HEAD' });
@@ -84,6 +84,8 @@ test('로컬 역할 권한, 대행사 수익, 광고 집행과 보상', { timeou
     assert.equal((await state(agency)).user.parent_id, operatorId);
     assert.equal((await state(operator)).agencies.some(item => item.username === credentials.username), true);
 
+    const rewardBefore = (await state(participant)).balances.reward;
+    const revenueBefore = (await state(operator)).balances.revenue;
     const amount = 100001;
     const charge = await post('charge', agency, { amount, key: 'test-charge' });
     assert.deepEqual(await post('charge', agency, { amount, key: 'test-charge' }), charge);
@@ -94,7 +96,7 @@ test('로컬 역할 권한, 대행사 수익, 광고 집행과 보상', { timeou
     await post('rates', admin, { operator_id: operatorId, rate: '' });
     const operatorState = await state(operator);
     assert.equal(operatorState.rate, 750);
-    assert.equal(operatorState.balances.revenue, 12340);
+    assert.equal(operatorState.balances.revenue, revenueBefore + 12340);
     assert.equal(operatorState.charges.find(item => item.id === charge.id).rate, 1234);
 
     const date = (await state(agency)).date;
@@ -119,7 +121,7 @@ test('로컬 역할 권한, 대행사 수익, 광고 집행과 보상', { timeou
     const pending = (await state(admin)).submissions.find(item => item.status === 'pending');
     await post('mission/review', admin, { id: pending.id, action: 'approve' });
     await post('mission/review', admin, { id: pending.id, action: 'approve' }, 409);
-    assert.equal((await state(participant)).balances.reward, 300);
+    assert.equal((await state(participant)).balances.reward, rewardBefore + 300);
     assert.equal((await state(agency)).campaigns.find(item => item.id === campaign.id).approved, 1);
     await post('campaign/decision', admin, { id: campaign.id, action: 'close' });
     assert.equal((await state(agency)).balances.credit, amount - 900);
@@ -131,7 +133,7 @@ test('로컬 역할 권한, 대행사 수익, 광고 집행과 보상', { timeou
     assert.equal((await state(participant)).missions.find(item => item.id === quiz.id).choices.length, 3);
     assert.equal((await post('mission', participant, { id: quiz.id, response: '0' })).status, 'approved');
     await post('mission', participant, { id: quiz.id, response: '0' });
-    assert.equal((await state(participant)).balances.reward, 450);
+    assert.equal((await state(participant)).balances.reward, rewardBefore + 450);
 
     const second = { username: 'qa.participant', password: 'qa-local-example-71' };
     await post('account', admin, { ...second, name: '두 번째 참여자', role: 'participant' });
@@ -184,6 +186,30 @@ test('로컬 역할 권한, 대행사 수익, 광고 집행과 보상', { timeou
       const expired = await state(agency);
       assert.equal(expired.campaigns.find(item => item.id === expiredWithoutReview.id).returned, 900);
       assert.equal(expired.balances.credit, settled.balances.credit);
+
+      const later = new Date(Date.parse(date) + 2 * 86_400_000).toISOString().slice(0, 10);
+      await post('campaign', agency, { ...orderData, goal: '3', daily_cap: '1', key: 'cap-too-low' }, 400);
+      const capped = await post('campaign', agency, { ...orderData, goal: '3', daily_cap: '1', end: later, memo: '한도 테스트', key: 'daily-cap' });
+      await post('campaign/decision', admin, { id: capped.id, action: 'approve' });
+      await post('mission/reserve', participant, capped);
+      await post('mission', participant, { ...answer, id: capped.id });
+      assert.equal((await state()).missions.find(item => item.id === capped.id).remaining, 0);
+      await assert.rejects(post('mission/reserve', otherParticipant, capped), /오늘 모집 인원/);
+
+      const report = await request(`report?id=${capped.id}`, { cookie: agency });
+      assert.equal(report.data.daily.at(-1).pending, 1);
+      assert.equal(report.data.responses[0].who.includes('*'), true);
+      await request(`report?id=${capped.id}`, { cookie: advertiser, expected: 404 });
+      await post('campaign/memo', advertiser, { id: capped.id, memo: '권한 없음' }, 404);
+      await post('campaign/memo', agency, { id: capped.id, memo: '메모 수정' });
+      assert.equal((await state(agency)).campaigns.find(item => item.id === capped.id).memo, '메모 수정');
+
+      await post('notice', operator, { title: '공지', body: '내용', audience: 'all' }, 403);
+      const notice = await post('notice', admin, { title: '광고 계정 공지', body: '광고 계정에만 보입니다.', audience: 'business' });
+      assert.equal((await state(agency)).notices.some(item => item.id === notice.id), true);
+      assert.equal((await state(participant)).notices.some(item => item.id === notice.id), false);
+      await post('notice/delete', admin, notice);
+      assert.equal((await state(agency)).notices.some(item => item.id === notice.id), false);
     } finally {
       fixture.close();
     }
