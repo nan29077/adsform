@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomInt, scryptSync, timingSafeEqual } from 'node:crypto';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,6 +18,9 @@ const partners = ['advertiser', 'agency', 'operator'];
 const backgrounds = ['grove', 'tide', 'lilac', 'sunset', 'night', 'studio', 'creator', 'city', 'showroom', 'growth'];
 const products = { quiz: { cost: 500, reward: 150 }, survey: { cost: 900, reward: 300 } };
 const reservationMinutes = 10;
+const avatarCount = 30;
+const avatarSize = 256;
+const avatarLimit = 128 * 1024;
 const dateKst = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul' }).format();
 const now = () => new Date().toISOString();
 
@@ -34,6 +37,12 @@ db.exec(`
   );
   CREATE TABLE IF NOT EXISTS sessions (
     token TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), expires INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS user_profiles (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    avatar_variant INTEGER NOT NULL CHECK (avatar_variant BETWEEN 0 AND 29),
+    avatar_image BLOB,
+    avatar_version TEXT
   );
   CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS charges (
@@ -277,6 +286,30 @@ function role(user, allowed) {
   assert(allowed.includes(user.role), '이 기능을 사용할 권한이 없습니다.', 403);
 }
 
+function userProfile(userId) {
+  let profile = get('SELECT avatar_variant, avatar_version FROM user_profiles WHERE user_id=?', userId);
+  if (!profile) {
+    run('INSERT OR IGNORE INTO user_profiles (user_id, avatar_variant) VALUES (?,?)', userId, randomInt(avatarCount));
+    profile = get('SELECT avatar_variant, avatar_version FROM user_profiles WHERE user_id=?', userId);
+  }
+  return { variant: profile.avatar_variant, version: profile.avatar_version };
+}
+
+function isAvatarJpeg(image) {
+  if (image.length < 16 || image.readUInt16BE(0) !== 0xffd8 || image.readUInt16BE(image.length - 2) !== 0xffd9) return false;
+  for (let offset = 2; offset + 4 <= image.length;) {
+    const marker = image.readUInt16BE(offset);
+    if ((marker & 0xff00) !== 0xff00 || marker === 0xffda) return false;
+    const length = image.readUInt16BE(offset + 2);
+    if (length < 2 || offset + 2 + length > image.length) return false;
+    if (marker === 0xffc0 || marker === 0xffc2) {
+      return length >= 8 && image.readUInt16BE(offset + 5) === avatarSize && image.readUInt16BE(offset + 7) === avatarSize;
+    }
+    offset += 2 + length;
+  }
+  return false;
+}
+
 function str(value, label, max, min = 1) {
   const result = typeof value === 'string' ? value.trim() : '';
   assert(result.length >= min && result.length <= max, `${label}은(는) ${min}~${max}자로 입력해 주세요.`);
@@ -393,6 +426,7 @@ function summary(user) {
   expireCampaigns();
   const result = { user: clean(user), demo, background: setting('background'), products, missions: publicCampaigns(user), date: dateKst(), reservationMinutes };
   if (!user) return result;
+  result.user.avatar = userProfile(user.id);
   result.ledger = all('SELECT wallet,amount,kind,ref,created FROM ledger WHERE user_id=? ORDER BY created DESC, id DESC LIMIT 100', user.id);
   result.balances = Object.fromEntries(['credit', 'revenue', 'reward'].map(wallet => [wallet, balance(user.id, wallet)]));
   const audience = audienceFor(user);
@@ -771,6 +805,12 @@ function reviewInquiry(user, body) {
 }
 
 const routes = {
+  '/api/profile/avatar/reset': (_req, _res, user, body) => {
+    role(user, roles);
+    assert(body.account === user.id, '현재 로그인 계정을 다시 확인해 주세요.', 409);
+    run('UPDATE user_profiles SET avatar_image=NULL, avatar_version=NULL WHERE user_id=?', user.id);
+    return {};
+  },
   '/api/login': (req, res, user, body) => authenticate(req, res, body),
   '/api/demo': (req, res, user, body) => {
     assert(demo && roles.includes(body.role), '테스트 로그인을 사용할 수 없습니다.', 403);
@@ -822,17 +862,23 @@ const routes = {
   }
 };
 
-async function payload(req) {
-  assert(req.headers['content-type']?.split(';')[0] === 'application/json', 'JSON 요청이 필요합니다.', 415);
+async function readBody(req, limit) {
+  assert(Number(req.headers['content-length'] || 0) <= limit, '요청 크기 제한을 초과했습니다.', 413);
   const parts = [];
   let bytes = 0;
-  for await (const part of req) {
+  for await (const part of req.iterator({ destroyOnReturn: false })) {
     bytes += part.length;
-    assert(bytes <= 32768, '요청 크기 제한을 초과했습니다.', 413);
+    assert(bytes <= limit, '요청 크기 제한을 초과했습니다.', 413);
     parts.push(part);
   }
+  return Buffer.concat(parts);
+}
+
+async function payload(req) {
+  assert(req.headers['content-type']?.split(';')[0] === 'application/json', 'JSON 요청이 필요합니다.', 415);
+  const body = await readBody(req, 32768);
   try {
-    const data = JSON.parse(Buffer.concat(parts).toString());
+    const data = JSON.parse(body.toString());
     assert(data && typeof data === 'object' && !Array.isArray(data), '잘못된 요청입니다.');
     return data;
   } catch {
@@ -853,11 +899,32 @@ function json(res, status, data) {
   res.end(JSON.stringify(data));
 }
 
+async function avatarRequest(req, res, user, url) {
+  role(user, roles);
+  if (req.method === 'GET' || req.method === 'HEAD') {
+    const profile = get('SELECT avatar_image FROM user_profiles WHERE user_id=? AND avatar_version=?', user.id, url.searchParams.get('v'));
+    assert(profile?.avatar_image, '등록된 프로필 이미지가 없습니다.', 404);
+    res.writeHead(200, { ...headers, 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, no-store' });
+    return res.end(req.method === 'HEAD' ? undefined : profile.avatar_image);
+  }
+  assert(req.method === 'POST', '지원하지 않는 요청입니다.', 405);
+  assert(req.headers.origin === `http://${req.headers.host}`, '같은 사이트에서 요청해 주세요.', 403);
+  assert(url.searchParams.get('account') === String(user.id), '현재 로그인 계정을 다시 확인해 주세요.', 409);
+  assert(req.headers['content-type'] === 'image/jpeg', '프로필 이미지를 JPG로 보내 주세요.', 415);
+  const image = await readBody(req, avatarLimit);
+  assert(isAvatarJpeg(image), '프로필 이미지 형식이 올바르지 않습니다.');
+  run(`INSERT INTO user_profiles (user_id, avatar_variant, avatar_image, avatar_version) VALUES (?,?,?,?)
+    ON CONFLICT(user_id) DO UPDATE SET avatar_image=excluded.avatar_image, avatar_version=excluded.avatar_version`,
+    user.id, randomInt(avatarCount), image, randomBytes(8).toString('hex'));
+  return json(res, 200, {});
+}
+
 const server = createServer(async (req, res) => {
   try {
     const host = req.headers.host;
     assert([ `127.0.0.1:${port}`, `localhost:${port}` ].includes(host), '로컬 주소로 접속해 주세요.', 403);
     const url = new URL(req.url, `http://${host}`);
+    if (url.pathname === '/api/profile/avatar') return await avatarRequest(req, res, session(req), url);
     if (url.pathname === '/api/state' && req.method === 'GET') return json(res, 200, summary(session(req)));
     if (url.pathname === '/api/report' && req.method === 'GET') return json(res, 200, report(session(req), int(url.searchParams.get('id') || '', '캠페인 번호', 1, 1e9)));
     if (req.method === 'POST' && Object.hasOwn(routes, url.pathname)) {

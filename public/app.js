@@ -5,6 +5,8 @@ const icons = {
   user: '<circle cx="12" cy="8" r="3.5"/><path d="M4.5 21v-2a5 5 0 0 1 5-5h5a5 5 0 0 1 5 5v2"/>',
   arrow: '<path d="M4 12h15m-6-6 6 6-6 6"/>',
   chevron: '<path d="m9 18 6-6-6-6"/>',
+  pause: '<path d="M9 5v14m6-14v14"/>',
+  play: '<path d="m8 5 12 7-12 7Z"/>',
   star: '<path d="M12 2.5c1.4 6.1 3.4 8.1 9.5 9.5-6.1 1.4-8.1 3.4-9.5 9.5C10.6 15.4 8.6 13.4 2.5 12c6.1-1.4 8.1-3.4 9.5-9.5Z"/>',
   survey: '<rect x="5" y="5" width="14" height="16" rx="2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6m-6 4h6"/>',
   bag: '<rect x="3" y="7" width="18" height="14" rx="2"/><path d="M8 7V4h8v3m-13 6h18"/>',
@@ -32,6 +34,9 @@ const backgrounds = {
   studio: '광고 기획 스튜디오', creator: '콘텐츠 촬영 스튜디오', city: '도심 속 브랜드 광고', showroom: '브랜드 쇼룸', growth: '캠페인 성장 가든'
 };
 const slogan = '작은 미션, 새로운 연결';
+const avatarSheets = ['woodland', 'pets', 'ocean', 'safari', 'garden'];
+const avatarFileLimit = 10 * 1024 * 1024;
+const avatarFileTypes = ['image/jpeg', 'image/png', 'image/webp'];
 const brandMark = '<img class="mark" src="/icon.svg?v=2" alt="" width="64" height="64">';
 const wordmark = '<strong>adsform<span>.</span></strong>';
 const banners = [
@@ -68,6 +73,9 @@ const btn = (text, attrs = '', theme = 'primary') => `<button class="btn ${theme
 const dialog = $('#dialog');
 let state;
 let slide = 0;
+const bannerInterval = 6000;
+let bannerTimer;
+let bannerPaused = matchMedia('(prefers-reduced-motion: reduce)').matches;
 let toastTimer;
 
 async function api(path, body) {
@@ -111,11 +119,24 @@ function scrollToView(focus) {
   }
 }
 
+function profileAvatar(user, size = '') {
+  const avatar = user?.avatar;
+  let image = icon('user');
+  if (avatar?.version) {
+    image = `<img class="avatar-photo" src="/api/profile/avatar?v=${esc(avatar.version)}" alt="">`;
+  } else if (avatar) {
+    const sheet = avatarSheets[Math.floor(avatar.variant / 6)];
+    const cell = avatar.variant % 6;
+    image = `<img class="avatar-sheet avatar-column-${cell % 3} avatar-row-${Math.floor(cell / 3)}" src="/assets/avatars-${sheet}.webp" alt="">`;
+  }
+  return `<span class="profile-avatar ${size}" aria-hidden="true">${image}</span>`;
+}
+
 function nav() {
   const user = state.user;
   $('#header').innerHTML = `<a class="logo" href="/" aria-label="애즈폼 홈">${brandMark}${wordmark}<span class="logo-ko">애즈폼</span></a>
     <div class="header-actions"><button type="button" class="icon-btn" data-guide aria-label="이용 안내">${icon('bell')}</button>
-    <a href="${user ? '/manage' : '/login'}" class="login-link">${user ? esc(roleName[user.role]) : '로그인'}${icon('chevron')}</a></div>`;
+    <a href="${user ? '/manage' : '/login'}" class="login-link">${user ? profileAvatar(user, 'avatar-small') + esc(roleName[user.role]) : '로그인'}${icon('chevron')}</a></div>`;
   const participant = user?.role === 'participant';
   const links = [
     ['/', 'home', '홈'], ['/missions', 'target', '참여'],
@@ -127,20 +148,54 @@ function nav() {
     const target = new URL(url, location.origin);
     const selected = target.pathname === location.pathname && target.hash === location.hash;
     return `<a href="${url}"${desktop ? ' class="rail-only"' : ''}${selected ? ' aria-current="page"' : ''}>
-      <span class="nav-icon">${icon(glyph)}</span><span>${text}</span></a>`;
+      ${glyph === 'user' && user ? profileAvatar(user) : `<span class="nav-icon">${icon(glyph)}</span>`}<span>${text}</span></a>`;
   }).join('') + '<span class="rail-wordmark rail-only" aria-hidden="true">ADSFORM</span>';
   $('#support').innerHTML = `<button type="button" class="support-button" data-support>${icon('chat')}<span>문의하기</span></button>`;
 }
 
+function bannerCopy(banner) {
+  return `<span class="eyebrow">${banner.label}</span>
+      <h1>${banner.title.replace('\n', '<br>')}</h1><p>${banner.text}</p>
+      <a href="${banner.action}">${banner.cta} ${icon('arrow')}</a>`;
+}
+
+const nextSlide = () => (slide + 1) % banners.length;
+const bannerCount = () => `0${slide + 1} / 0${banners.length}`;
+const bannerLabel = () => `추천 캠페인 ${slide + 1} / ${banners.length}`;
+const bannerToggleLabel = () => bannerPaused ? '배너 자동 전환 시작' : '배너 자동 전환 일시정지';
+
 function carousel() {
   const banner = banners[slide];
-  return `<section class="hero hero-${banner.name}" aria-label="추천 캠페인 ${slide + 1} / 3">
-    <div class="hero-art"></div><div class="hero-copy"><span class="eyebrow">${banner.label}</span>
-      <h1>${banner.title.replace('\n', '<br>')}</h1><p>${banner.text}</p>
-      <a href="${banner.action}">${banner.cta} ${icon('arrow')}</a></div>
+  return `<section class="hero hero-${banner.name}" aria-label="${bannerLabel()}">
+    <div class="hero-art"></div><div class="hero-copy">${bannerCopy(banner)}</div>
     <div class="carousel"><div class="dots">${banners.map((_, i) => `<button type="button" data-slide="${i}" aria-label="배너 ${i + 1}" aria-pressed="${i === slide}"></button>`).join('')}</div>
-      <span>0${slide + 1} / 03</span><button type="button" data-slide="${(slide + 1) % banners.length}" aria-label="다음 배너">${icon('chevron')}</button></div>
+      <span data-banner-count>${bannerCount()}</span>
+      <button type="button" data-next-banner aria-label="다음 배너">${icon('chevron')}</button>
+      <button type="button" data-toggle-banner aria-label="${bannerToggleLabel()}">${icon(bannerPaused ? 'play' : 'pause')}</button></div>
   </section>`;
+}
+
+function showBanner(index) {
+  slide = index;
+  const hero = $('#hero-slot .hero');
+  const banner = banners[slide];
+  hero.className = `hero hero-${banner.name}`;
+  hero.setAttribute('aria-label', bannerLabel());
+  hero.querySelector('.hero-copy').innerHTML = bannerCopy(banner);
+  hero.querySelector('[data-banner-count]').textContent = bannerCount();
+  for (const dot of hero.querySelectorAll('[data-slide]')) {
+    dot.setAttribute('aria-pressed', String(Number(dot.dataset.slide) === slide));
+  }
+}
+
+function scheduleBannerRotation() {
+  clearTimeout(bannerTimer);
+  const copy = $('#hero-slot .hero-copy');
+  if (!copy || bannerPaused || document.hidden) return;
+  bannerTimer = setTimeout(() => {
+    if (!dialog.open && !copy.contains(document.activeElement)) showBanner(nextSlide());
+    scheduleBannerRotation();
+  }, bannerInterval);
 }
 
 function missionCard(mission) {
@@ -248,6 +303,7 @@ function account() {
   const wallet = isParticipant ? 'reward' : 'credit';
   const entries = state.ledger.filter(entry => entry.wallet === wallet);
   return `<div class="content">${pageHead('MY ADSFORM', esc(user.name), `${roleName[user.role]} · ${esc(user.username)}`)}
+    <section class="panel account-profile">${profileImageEditor(user)}</section>
     <div class="balance-card"><div>${icon(isParticipant ? 'gift' : 'card')}<span>${isParticipant ? '보유 포인트' : '광고 잔액'}</span></div><strong>${format(state.balances[wallet])}<small> ${isParticipant ? 'P' : '원'}</small></strong>
       <a href="${isParticipant ? '/missions' : '/manage'}">${isParticipant ? '미션 둘러보기' : '관리 화면 열기'} ${icon('arrow')}</a></div>
     ${isParticipant ? `<section class="section"><h2>내 참여 내역</h2>${state.submissions.length ? state.submissions.map(s => `<div class="record"><div><b>${esc(s.title)}</b><small>${esc(s.reason || day(s.created))}</small></div>${badge(s.status)}</div>`).join('') : empty('아직 참여한 미션이 없어요.')}</section>` : ''}
@@ -959,8 +1015,58 @@ function participantRewards() {
     <section class="panel dash-block">${panelHead('포인트 적립 기록', '거래 후 잔액 포함')}${ledgerRows('reward', 'P')}</section>`;
 }
 
+function profileImageEditor(user) {
+  return `<div class="profile-image-editor">
+    ${profileAvatar(user, 'avatar-large')}
+    <div><h3>프로필 이미지</h3><p class="muted">${user.avatar?.version ? '등록한 사진을 사용 중입니다.' : '기본 캐릭터를 사용 중입니다.'}</p></div>
+  </div>
+  <form class="form profile-image-form" data-avatar-upload>
+    ${field('이미지 선택', 'photo', 'file', 'accept="image/jpeg,image/png,image/webp" aria-describedby="profile-image-hint" required')}
+    <p class="form-hint" id="profile-image-hint">JPG, PNG, WebP · 최대 10MB. 사진 중앙을 정사각형으로 맞춥니다.</p>
+    <div class="actions">${btn('프로필 이미지 저장', 'type="submit"')}
+    ${user.avatar?.version ? btn('기본 캐릭터 사용', 'type="button" data-reset-avatar', 'quiet') : ''}</div>
+  </form>`;
+}
+
+async function avatarPhoto(file) {
+  if (!file?.size || !avatarFileTypes.includes(file.type)) throw new Error('JPG, PNG, WebP 이미지를 선택해 주세요.');
+  if (file.size > avatarFileLimit) throw new Error('이미지는 10MB 이하로 선택해 주세요.');
+  const bitmap = await createImageBitmap(file).catch(() => {
+    throw new Error('이미지를 열 수 없습니다. 다른 파일을 선택해 주세요.');
+  });
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 256;
+  const context = canvas.getContext('2d');
+  try {
+    const side = Math.min(bitmap.width, bitmap.height);
+    context.fillStyle = '#f7f9f6';
+    context.fillRect(0, 0, 256, 256);
+    context.drawImage(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side, 0, 0, 256, 256);
+  } finally {
+    bitmap.close();
+  }
+  const photo = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+  if (!photo) throw new Error('프로필 이미지를 만들 수 없습니다.');
+  return photo;
+}
+
+async function saveAvatar(file, userId) {
+  const photo = await avatarPhoto(file);
+  const response = await fetch('/api/profile/avatar?account=' + userId, {
+    method: 'POST',
+    headers: { 'Content-Type': 'image/jpeg' },
+    body: photo
+  });
+  if (!response.ok) {
+    const data = await response.json();
+    throw new Error(data.error || '프로필 이미지를 저장하지 못했습니다.');
+  }
+  await reload();
+  showToast('프로필 이미지를 저장했습니다.');
+}
+
 function consoleProfile(user) {
-  return `<section class="panel console-profile"><span class="console-avatar">${icon('user')}</span><h2>${esc(user.name)}</h2>
+  return `<section class="panel console-profile"><h2>${esc(user.name)}</h2>${profileImageEditor(user)}
     <dl><div><dt>계정 유형</dt><dd>${roleName[user.role]}</dd></div><div><dt>로그인 아이디</dt><dd>${esc(user.username)}</dd></div>
       ${user.role === 'participant' ? `<div><dt>보유 포인트</dt><dd>${format(state.balances.reward)}P</dd></div>` : user.role !== 'admin' ? `<div><dt>광고 잔액</dt><dd>${format(state.balances.credit)}원</dd></div>` : ''}</dl>
     <div class="actions">${btn('로그아웃', 'type="button" data-logout', 'quiet')}
@@ -981,16 +1087,16 @@ function manage(params) {
     charges: state.charges.filter(c => c.status === 'pending').length, inquiries: state.adminCounts.unreadInquiries } : {};
   const views = { overview: () => overview(user), new: () => orderForm(params), orders: () => orders(params, admin), charges: () => charges(params, admin), ledger: ledgerView,
     partners: () => partnerAdmin(params), notices, design, inquiries, agencies, revenue, submissions: () => submissions(params), history: () => participantHistory(params), rewards: participantRewards, profile: () => consoleProfile(user) };
-  const menuLink = ([key, label, glyph]) => `<a href="/manage?tab=${key}"${key === tab ? ' aria-current="page"' : ''}>${icon(glyph)}<span>${label}</span>${badges[key] ? `<em class="nav-badge">${format(badges[key])}</em>` : ''}</a>`;
+  const menuLink = ([key, label, glyph]) => `<a href="/manage?tab=${key}"${key === tab ? ' aria-current="page"' : ''}>${key === 'profile' ? profileAvatar(user, 'avatar-small') : icon(glyph)}<span>${label}</span>${badges[key] ? `<em class="nav-badge">${format(badges[key])}</em>` : ''}</a>`;
   const balanceLine = participant ? `${format(state.balances.reward)} P` : admin ? '' : `${format(state.balances.credit)}원`;
   return `<div class="console-frame">
     <div class="console-mobile-bar"><button type="button" class="icon-btn" data-console-menu aria-controls="console-sidebar" aria-expanded="false" aria-label="관리 메뉴 열기">${icon('menu')}</button>
-      <strong>${title}</strong><span>${roleName[user.role]}</span></div>
+      <strong>${title}</strong><a class="console-mobile-profile" href="/manage?tab=profile" aria-label="프로필">${profileAvatar(user)}${roleName[user.role]}</a></div>
     <div class="console-backdrop" data-console-close hidden></div>
     <aside id="console-sidebar" class="console-sidebar">
       <div class="console-brand"><a class="logo" href="/manage" aria-label="애즈폼 대시보드">${brandMark}${wordmark}</a>
         <button type="button" class="icon-btn console-close" data-console-close aria-label="관리 메뉴 닫기">${icon('close')}</button></div>
-      <div class="console-identity"><span class="console-avatar">${icon('user')}</span><div><strong>${esc(user.name)}</strong><small>${roleName[user.role]}${state.demo ? ' · 로컬 데모' : ''}</small></div></div>
+      <div class="console-identity">${profileAvatar(user)}<div><strong>${esc(user.name)}</strong><small>${roleName[user.role]}${state.demo ? ' · 로컬 데모' : ''}</small></div></div>
       ${balanceLine ? `<a class="console-wallet" href="/manage?tab=${participant ? 'rewards' : 'ledger'}"><span>${participant ? '보유 포인트' : '광고 잔액'}</span><b>${balanceLine}</b></a>` : ''}
       <nav aria-label="관리 메뉴">${groups.map(([group, items]) => `<div class="console-nav-group"><span>${group}</span>${items.map(menuLink).join('')}</div>`).join('')}
       ${participant ? `<div class="console-nav-group"><a href="/missions">${icon('target')}<span>미션 찾기</span></a></div>` : ''}</nav>
@@ -1011,6 +1117,7 @@ function render() {
   const params = new URLSearchParams(location.search);
   const pages = { '/': home, '/missions': missions, '/login': login, '/account': state.user ? account : login, '/manage': manage };
   $('#main').innerHTML = (pages[location.pathname] || home)(params);
+  scheduleBannerRotation();
   const campaign = $('[data-form="campaign"]');
   if (campaign) {
     const copy = state.campaigns?.find(item => String(item.id) === params.get('copy'));
@@ -1079,11 +1186,25 @@ document.addEventListener('click', event => {
   const d = button.dataset;
   if ('consoleClose' in d) setConsoleMenu(false);
   if ('consoleMenu' in d) setConsoleMenu(button.getAttribute('aria-expanded') !== 'true');
-  if ('slide' in d) {
-    slide = Number(d.slide);
-    const nextControl = button.hasAttribute('aria-pressed') ? `[data-slide="${slide}"][aria-pressed]` : '[aria-label="다음 배너"]';
-    $('#hero-slot').innerHTML = carousel();
-    $(nextControl)?.focus({ preventScroll: true });
+  if ('slide' in d || 'nextBanner' in d) {
+    showBanner('slide' in d ? Number(d.slide) : nextSlide());
+    scheduleBannerRotation();
+    return;
+  }
+  if ('toggleBanner' in d) {
+    bannerPaused = !bannerPaused;
+    button.setAttribute('aria-label', bannerToggleLabel());
+    button.innerHTML = icon(bannerPaused ? 'play' : 'pause');
+    scheduleBannerRotation();
+    return;
+  }
+  if ('resetAvatar' in d) {
+    act(button, async () => {
+      await api('/api/profile/avatar/reset', { account: state.user.id });
+      await reload();
+      showToast('기본 캐릭터로 돌아갔습니다.');
+    });
+    return;
   }
   if ('mission' in d) act(button, async () => {
     await reload();
@@ -1155,6 +1276,14 @@ document.addEventListener('input', event => {
 
 document.addEventListener('submit', event => {
   const form = event.target;
+  if (form.hasAttribute('data-avatar-upload')) {
+    event.preventDefault();
+    const button = event.submitter || form.querySelector('button[type="submit"]');
+    const file = form.elements.photo.files[0];
+    const userId = state.user.id;
+    act(button, () => saveAvatar(file, userId));
+    return;
+  }
   if (form.dataset.filter) {
     event.preventDefault();
     const query = new URLSearchParams({ tab: form.dataset.filter });
@@ -1196,6 +1325,7 @@ addEventListener('popstate', () => {
   render();
   scrollToView(false);
 });
+document.addEventListener('visibilitychange', scheduleBannerRotation);
 reload().then(() => scrollToView(false)).catch(error => {
   $('#main').textContent = error.message;
   showToast('서버 상태를 확인해 주세요.');

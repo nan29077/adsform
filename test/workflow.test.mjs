@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtempSync, rmSync, rmdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, rmdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -51,6 +51,33 @@ test('로컬 역할 권한, 대행사 수익, 광고 집행과 보상', { timeou
     const initialAgency = await session('agency');
     assert.equal((await state(initialAgency)).user.parent_id, operatorId);
 
+    const participantProfile = (await state(participant)).user;
+    assert.ok(Number.isInteger(participantProfile.avatar.variant) && participantProfile.avatar.variant >= 0 && participantProfile.avatar.variant < 30);
+    assert.equal(participantProfile.avatar.version, null);
+    const photo = readFileSync(new URL('./fixtures/profile-photo.jpg', import.meta.url));
+    const uploadAvatar = (cookie, account = participantProfile.id, site = origin, body = photo) =>
+      fetch(`${origin}/api/profile/avatar?account=${account}`, {
+        method: 'POST', headers: { Cookie: cookie, Origin: site, 'Content-Type': 'image/jpeg' }, body
+      });
+    assert.equal((await uploadAvatar('', participantProfile.id)).status, 401);
+    assert.equal((await uploadAvatar(admin)).status, 409);
+    assert.equal((await uploadAvatar(participant, participantProfile.id, 'https://other.example')).status, 403);
+    assert.equal((await uploadAvatar(participant, participantProfile.id, origin, Buffer.from('not a photo'))).status, 400);
+    assert.equal((await uploadAvatar(participant)).status, 200);
+    const savedAvatar = (await state(await session('participant'))).user.avatar;
+    assert.equal(savedAvatar.variant, participantProfile.avatar.variant);
+    assert.ok(savedAvatar.version);
+    const photoUrl = `${origin}/api/profile/avatar?v=${savedAvatar.version}`;
+    assert.equal((await fetch(photoUrl)).status, 401);
+    assert.equal((await fetch(photoUrl, { headers: { Cookie: admin } })).status, 404);
+    const servedPhoto = await fetch(photoUrl, { headers: { Cookie: participant } });
+    assert.equal(servedPhoto.headers.get('content-type'), 'image/jpeg');
+    assert.deepEqual(Buffer.from(await servedPhoto.arrayBuffer()), photo);
+    await post('profile/avatar/reset', admin, { account: participantProfile.id }, 409);
+    await post('profile/avatar/reset', participant, { account: participantProfile.id });
+    assert.deepEqual((await state(participant)).user.avatar, participantProfile.avatar);
+    assert.equal((await fetch(photoUrl, { headers: { Cookie: participant } })).status, 404);
+
     await post('background', operator, { value: 'lilac' }, 403);
     await request('background', { cookie: admin, body: { value: 'lilac' }, site: 'https://other.example', expected: 403 });
     await post('background', admin, { value: 'lilac' });
@@ -65,7 +92,7 @@ test('로컬 역할 권한, 대행사 수익, 광고 집행과 보상', { timeou
     await post('background', admin, { value: 'lilac' });
     assert.equal((await state()).missions.length, 10);
     assert.equal(Object.hasOwn((await state()).missions[0], 'answer'), false);
-    for (const name of ['banner-quiz-photo', 'banner-survey', 'banner-partner', 'wallpaper-grove', 'wallpaper-tide', 'wallpaper-lilac', 'wallpaper-sunset', 'wallpaper-night', 'wallpaper-studio', 'wallpaper-creator', 'wallpaper-city', 'wallpaper-showroom', 'wallpaper-growth']) {
+    for (const name of ['banner-quiz-photo', 'banner-survey', 'banner-partner', 'wallpaper-grove', 'wallpaper-tide', 'wallpaper-lilac', 'wallpaper-sunset', 'wallpaper-night', 'wallpaper-studio', 'wallpaper-creator', 'wallpaper-city', 'wallpaper-showroom', 'wallpaper-growth', 'avatars-woodland', 'avatars-pets', 'avatars-ocean', 'avatars-safari', 'avatars-garden']) {
       const asset = await fetch(origin + '/assets/' + name + '.webp', { method: 'HEAD' });
       assert.equal(asset.status, 200, name);
       assert.equal(asset.headers.get('content-type'), 'image/webp');

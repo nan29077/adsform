@@ -50,6 +50,17 @@ svg { display: inline-block; vertical-align: middle; flex: none; }
 .icon-btn svg { width: 19px; height: 19px; }
 .login-link { display: inline-flex; align-items: center; gap: 3px; padding: 8px 10px 8px 12px; border-radius: 99px; color: var(--green); font-size: 12px; font-weight: 800; background: #e7f2e6; white-space: nowrap; }
 .login-link svg { width: 14px; height: 14px; }
+.profile-avatar { position: relative; display: inline-grid; place-items: center; flex: none; width: 32px; height: 32px; overflow: hidden; border-radius: 50%; background: #e4f3d4; color: #285a41; }
+.profile-avatar.avatar-small { width: 24px; height: 24px; }
+.profile-avatar.avatar-large { width: 72px; height: 72px; }
+.avatar-photo { display: block; width: 100%; height: 100%; object-fit: cover; }
+.avatar-sheet { position: absolute; width: 300%; height: 200%; max-width: none; }
+.avatar-column-0 { left: 0; }
+.avatar-column-1 { left: -100%; }
+.avatar-column-2 { left: -200%; }
+.avatar-row-0 { top: 0; }
+.avatar-row-1 { top: -100%; }
+.login-link .profile-avatar { margin-right: 3px; }
 .content { padding: 25px 24px 108px; }
 .home-page { padding-top: 17px; }
 .hero { height: 294px; position: relative; overflow: hidden; border-radius: 24px; isolation: isolate; --hero-bg: #d7eddf; --hero-ink: #1c543e; --hero-mobile: #193b31; background: var(--hero-bg); }
@@ -273,8 +284,6 @@ dialog::backdrop { background: #142820a8; }
 .console-brand .mark { outline: 1px solid #e6f5c567; outline-offset: -1px; border-radius: 11px; }
 .console-brand .logo strong span { color: #e4f79b; }
 .console-identity { min-width: 0; display: flex; gap: 9px; align-items: center; padding: 11px 9px; border: 1px solid #ffffff26; border-radius: 13px; background: #ffffff0a; }
-.console-avatar { width: 34px; height: 34px; display: grid; flex: none; place-items: center; border-radius: 11px; background: #e4f3d4; color: #285a41; }
-.console-avatar svg { width: 18px; height: 18px; }
 .console-identity > div { min-width: 0; display: grid; gap: 3px; }
 .console-identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #fff; font-size: 13px; }
 .console-identity small { color: #c1d5c7; font-size: 10px; }
@@ -320,7 +329,11 @@ dialog::backdrop { background: #142820a8; }
 .console-inline-link { display: inline-flex; gap: 5px; align-items: center; margin-top: 14px; color: var(--green); font-size: 12px; font-weight: 800; }
 .console-activity { margin-top: 12px; }
 .console-profile { max-width: 470px; }
-.console-profile h2 { margin-top: 8px; }
+.profile-image-editor { display: flex; align-items: center; gap: 14px; margin: 14px 0; }
+.profile-image-editor h3 { margin: 0 0 4px; }
+.profile-image-form { min-width: 0; }
+.profile-image-form .actions { margin-top: 0; }
+.account-profile { margin-bottom: 14px; }
 .console-profile dl { margin: 12px 0; }
 .console-profile dl div { display: flex; gap: 12px; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
 .console-profile dt { color: var(--muted); }
@@ -390,7 +403,7 @@ dialog::backdrop { background: #142820a8; }
 @media (max-width: 800px) {
   .console-frame { display: block; }
   .console-mobile-bar { position: sticky; z-index: 3; top: 0; display: flex; align-items: center; gap: 9px; padding: 9px 14px; background: #fff; border-bottom: 1px solid var(--line); }
-  .console-mobile-bar span { margin-left: auto; color: var(--muted); font-size: 11px; }
+  .console-mobile-profile { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; white-space: nowrap; }
   .console-sidebar { visibility: hidden; transform: translateX(-100%); position: fixed; inset: 0 auto 0 0; width: min(282px,85vw); z-index: 5; transition: transform .18s ease, visibility .18s; }
   .console-frame.menu-open .console-sidebar { visibility: visible; transform: translateX(0); }
   .console-backdrop { position: fixed; inset: 0; display: block; z-index: 4; background: #11251ea1; }
@@ -401,6 +414,13 @@ dialog::backdrop { background: #142820a8; }
   .console-hero { flex-wrap: wrap; align-items: start; }
   .console-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 7px; }
   .console-split { grid-template-columns: minmax(0,1fr); }
+}
+@media (max-width: 380px) {
+  #header { padding-inline: 12px; }
+  .logo-ko { display: none; }
+  .header-actions { gap: 7px; }
+  .login-link { padding: 5px 7px; }
+  .login-link .profile-avatar { margin-right: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
