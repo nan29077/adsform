@@ -27,7 +27,10 @@ const roleName = { admin: '최고관리자', operator: '실행사', agency: '대
 const kinds = { quiz: '브랜드 퀴즈', survey: '설문 조사' };
 const statuses = { pending: '심사 대기', active: '진행 중', upcoming: '시작 예정', settling: '검수 후 정산', paused: '일시중지', closed: '종료', approved: '승인', rejected: '반려' };
 const ledgerNames = { opening: '테스트 잔액', charge: '충전 승인', reserve: '광고 예산 배정', release: '미집행 예산 반환', commission: '대행사 충전 수익', mission: '미션 보상' };
-const backgrounds = { grove: '봄날의 골목 상점', tide: '바닷가 카페', lilac: '라일락 책방', sunset: '노을빛 마켓', night: '저녁의 꽃가게' };
+const backgrounds = {
+  grove: '봄날의 골목 상점', tide: '바닷가 카페', lilac: '라일락 책방', sunset: '노을빛 마켓', night: '저녁의 꽃가게',
+  studio: '광고 기획 스튜디오', creator: '콘텐츠 촬영 스튜디오', city: '도심 속 브랜드 광고', showroom: '브랜드 쇼룸', growth: '캠페인 성장 가든'
+};
 const slogan = '작은 미션, 새로운 연결';
 const brandMark = '<img class="mark" src="/icon.svg?v=2" alt="" width="64" height="64">';
 const wordmark = '<strong>adsform<span>.</span></strong>';
@@ -115,7 +118,7 @@ function nav() {
     <a href="${user ? '/manage' : '/login'}" class="login-link">${user ? esc(roleName[user.role]) : '로그인'}${icon('chevron')}</a></div>`;
   const participant = user?.role === 'participant';
   const links = [
-    ['/', 'home', '홈'], ['/missions', 'target', '오퍼월'],
+    ['/', 'home', '홈'], ['/missions', 'target', '참여'],
     [participant ? '/manage?tab=rewards' : '/manage', participant ? 'gift' : 'bag', participant ? '보상' : '광고 관리'],
     ['/#guide', 'book', '이용방법', true], ['/#faq', 'help', 'FAQ'],
     [user ? '/manage?tab=profile' : '/login', 'user', '내 정보']
@@ -928,9 +931,9 @@ function notices() {
 }
 
 function design() {
-  return `<section class="panel"><h2>PC 화면 양옆 배경</h2><p class="muted">배경을 선택하면 애즈폼 PC 화면에 즉시 적용됩니다.</p>
+  return `<section class="panel"><h2>PC 화면 양옆 배경</h2><p class="muted">기존 감성 배경 5종과 광고 테마 5종 중 선택하세요. 선택한 배경은 애즈폼 PC 화면에 즉시 적용됩니다.</p>
     <div class="background-grid">${Object.entries(backgrounds).map(([key, name]) => `<button type="button" data-background="${key}" aria-pressed="${state.background === key}">
-    <img src="/assets/wallpaper-${key}.webp" alt=""><span>${name}</span>${state.background === key ? icon('check') : ''}</button>`).join('')}</div></section>`;
+    <img src="/assets/wallpaper-${key}.webp" alt="" loading="lazy"><span>${name}</span>${state.background === key ? icon('check') : ''}</button>`).join('')}</div></section>`;
 }
 
 function inquiries() {

@@ -32,6 +32,11 @@ svg { display: inline-block; vertical-align: middle; flex: none; }
 .theme-lilac .wallpaper { background-image: url("/assets/wallpaper-lilac.webp"); }
 .theme-sunset .wallpaper { background-image: url("/assets/wallpaper-sunset.webp"); }
 .theme-night .wallpaper { background-image: url("/assets/wallpaper-night.webp"); }
+.theme-studio .wallpaper { background-image: url("/assets/wallpaper-studio.webp"); }
+.theme-creator .wallpaper { background-image: url("/assets/wallpaper-creator.webp"); }
+.theme-city .wallpaper { background-image: url("/assets/wallpaper-city.webp"); }
+.theme-showroom .wallpaper { background-image: url("/assets/wallpaper-showroom.webp"); }
+.theme-growth .wallpaper { background-image: url("/assets/wallpaper-growth.webp"); }
 .logo { display: inline-flex; align-items: center; gap: 9px; white-space: nowrap; font-family: system-ui, sans-serif; letter-spacing: -.065em; }
 .mark { display: block; flex: none; width: 38px; height: 38px; }
 .eyebrow i { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 7px; background: currentColor; vertical-align: 1px; }

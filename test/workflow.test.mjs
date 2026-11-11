@@ -55,9 +55,17 @@ test('로컬 역할 권한, 대행사 수익, 광고 집행과 보상', { timeou
     await request('background', { cookie: admin, body: { value: 'lilac' }, site: 'https://other.example', expected: 403 });
     await post('background', admin, { value: 'lilac' });
     assert.equal((await state()).background, 'lilac');
+    for (const value of ['studio', 'creator', 'city', 'showroom', 'growth']) {
+      await post('background', operator, { value }, 403);
+      await post('background', admin, { value });
+      assert.equal((await state()).background, value);
+    }
+    await post('background', admin, { value: 'unknown' }, 400);
+    assert.equal((await state()).background, 'growth');
+    await post('background', admin, { value: 'lilac' });
     assert.equal((await state()).missions.length, 10);
     assert.equal(Object.hasOwn((await state()).missions[0], 'answer'), false);
-    for (const name of ['banner-quiz-photo', 'banner-survey', 'banner-partner', 'wallpaper-grove', 'wallpaper-tide', 'wallpaper-lilac', 'wallpaper-sunset', 'wallpaper-night']) {
+    for (const name of ['banner-quiz-photo', 'banner-survey', 'banner-partner', 'wallpaper-grove', 'wallpaper-tide', 'wallpaper-lilac', 'wallpaper-sunset', 'wallpaper-night', 'wallpaper-studio', 'wallpaper-creator', 'wallpaper-city', 'wallpaper-showroom', 'wallpaper-growth']) {
       const asset = await fetch(origin + '/assets/' + name + '.webp', { method: 'HEAD' });
       assert.equal(asset.status, 200, name);
       assert.equal(asset.headers.get('content-type'), 'image/webp');

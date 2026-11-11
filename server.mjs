@@ -15,7 +15,7 @@ const demo = process.env.ADSFORM_DEMO !== '0';
 const dbPath = resolve(process.env.ADSFORM_DB || resolve(root, 'data', demo ? 'demo.sqlite' : 'adsform.sqlite'));
 const roles = ['admin', 'advertiser', 'agency', 'operator', 'participant'];
 const partners = ['advertiser', 'agency', 'operator'];
-const backgrounds = ['grove', 'tide', 'lilac', 'sunset', 'night'];
+const backgrounds = ['grove', 'tide', 'lilac', 'sunset', 'night', 'studio', 'creator', 'city', 'showroom', 'growth'];
 const products = { quiz: { cost: 500, reward: 150 }, survey: { cost: 900, reward: 300 } };
 const reservationMinutes = 10;
 const dateKst = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul' }).format();

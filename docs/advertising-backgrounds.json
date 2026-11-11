@@ -1,0 +1,36 @@
+{
+  "generator": "built-in image_gen",
+  "date": "2026-11-11",
+  "images": [
+    {
+      "id": "studio",
+      "name": "광고 기획 스튜디오",
+      "asset": "/assets/wallpaper-studio.webp",
+      "prompt": "Asset type: desktop side-background wallpaper for Korean advertising / offerwall web app Adsform. One cohesive widescreen landscape image, 1536x1024. Main app will cover the CENTER 50 percent of this image; compose attractive complete subjects on the OUTER LEFT quarter and OUTER RIGHT quarter, leaving quiet open space in the middle. Subjects must remain recognizable at the far edges. Premium editorial quality, sophisticated forest green, warm cream, sage and restrained lime accent palette matching a clean web app. No words, no lettering, no logos, no watermarks, no charts with legible numbers. Fill entire image edge to edge. Use case: photorealistic-natural. Real Korean adult creative marketing team in a beautiful sunlit design studio with indoor plants. Far left two adult creatives at a table with color swatches, unbranded packaging moodboards and laptop, natural candid smiles; far right adult creative director with tablet near campaign mockup boards and plants. Beautiful architecture, realistic faces and hands, natural fabric and wood texture, warm daylight, calm uncluttered balanced composition."
+    },
+    {
+      "id": "creator",
+      "name": "콘텐츠 촬영 스튜디오",
+      "asset": "/assets/wallpaper-creator.webp",
+      "prompt": "Asset type: desktop side-background wallpaper for Korean advertising / offerwall web app Adsform. One cohesive widescreen landscape image, 1536x1024. Main app will cover the CENTER 50 percent of this image; compose attractive complete subjects on the OUTER LEFT quarter and OUTER RIGHT quarter, leaving quiet open space in the middle. Subjects must remain recognizable at the far edges. Premium editorial quality, sophisticated forest green, warm cream, sage and restrained lime accent palette matching a clean web app. No words, no lettering, no logos, no watermarks, no charts with legible numbers. Fill entire image edge to edge. Use case: photorealistic-natural. A high-end content production studio for advertising. Far left a real Korean adult woman creator recording a product video beside a small camera on tripod and softbox, half-body framing kept within left quarter. Far right real Korean adult male photographer photographing beautiful unbranded cream cosmetic bottles and green packaging on a sage plinth; studio lamp and plant at edge. Soft natural lighting, authentic believable human anatomy, elegant light studio, no busy equipment in center."
+    },
+    {
+      "id": "city",
+      "name": "도심 속 브랜드 광고",
+      "asset": "/assets/wallpaper-city.webp",
+      "prompt": "Asset type: desktop side-background wallpaper for Korean advertising / offerwall web app Adsform. One cohesive widescreen landscape image, 1536x1024. Main app will cover the CENTER 50 percent of this image; compose attractive complete subjects on the OUTER LEFT quarter and OUTER RIGHT quarter, leaving quiet open space in the middle. Subjects must remain recognizable at the far edges. Premium editorial quality, sophisticated forest green, warm cream, sage and restrained lime accent palette matching a clean web app. No words, no lettering, no logos, no watermarks, no charts with legible numbers. Fill entire image edge to edge. Use case: photorealistic-natural. Premium architectural advertising campaign photography in a contemporary Korean city at blue-hour dusk. Far left tall architecture and an illuminated outdoor advertising lightbox with an abstract sage/lime botanical product photograph and absolutely NO text. Far right stylish storefront with glowing advertising display featuring unbranded cream bottle still life; a few adult Korean pedestrians at bottom. Quiet central sky and distant city, atmospheric soft warm lights, refined muted green aesthetic, cinematic realistic photography."
+    },
+    {
+      "id": "showroom",
+      "name": "브랜드 쇼룸",
+      "asset": "/assets/wallpaper-showroom.webp",
+      "prompt": "Asset type: desktop side-background wallpaper for Korean advertising / offerwall web app Adsform. One cohesive widescreen landscape image, 1536x1024. Main app will cover the CENTER 50 percent of this image; compose attractive complete subjects on the OUTER LEFT quarter and OUTER RIGHT quarter, leaving quiet open space in the middle. Subjects must remain recognizable at the far edges. Premium editorial quality, sophisticated forest green, warm cream, sage and restrained lime accent palette matching a clean web app. No words, no lettering, no logos, no watermarks, no charts with legible numbers. Fill entire image edge to edge. Use case: stylized-concept. Elegant tactile miniature 3D brand experience showroom, warm cream background, soft sage architectural arches, finely crafted matte clay and frosted glass. Far left sculptural oversized green smartphone shape with blank screen, abstract speech bubbles, tiny botanical planter and small colorful unbranded product boxes; far right beautiful tabletop display with floating megaphone, cream gift boxes and lime accent discs. Objects grouped vertically at each edge, calm open center, beautiful soft studio shadows, high end editorial CGI, restrained and sophisticated not childish."
+    },
+    {
+      "id": "growth",
+      "name": "캠페인 성장 가든",
+      "asset": "/assets/wallpaper-growth.webp",
+      "prompt": "Asset type: desktop side-background wallpaper for Korean advertising / offerwall web app Adsform. One cohesive widescreen landscape image, 1536x1024. Main app will cover the CENTER 50 percent of this image; compose attractive complete subjects on the OUTER LEFT quarter and OUTER RIGHT quarter, leaving quiet open space in the middle. Subjects must remain recognizable at the far edges. Premium editorial quality, sophisticated forest green, warm cream, sage and restrained lime accent palette matching a clean web app. No words, no lettering, no logos, no watermarks, no charts with legible numbers. Fill entire image edge to edge. Use case: illustration-story. Sophisticated soft 3D illustrated garden of advertising connections. Far left a friendly adult illustrated marketing professional beside a large sage megaphone, sculptural leaves and floating rounded message tiles; far right another adult illustrated professional with tablet beside ascending rounded green blocks, tiny gold reward discs and creative campaign moodboard shapes with blank faces. Tactile matte surfaces, delicate plant details, graceful curved forms, warm ivory and pale mint atmosphere, airy and uncluttered, joyful but premium, center mostly quiet."
+    }
+  ]
+}
