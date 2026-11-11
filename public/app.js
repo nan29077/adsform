@@ -22,13 +22,17 @@ const icons = {
   help: '<circle cx="12" cy="12" r="9"/><path d="M9.4 9a2.7 2.7 0 0 1 5.2 1c0 1.5-2.6 2-2.6 3.4m0 3.1h.01"/>',
   book: '<path d="M12 5v15M3 4h4a5 5 0 0 1 5 2 5 5 0 0 1 5-2h4v14h-4a6 6 0 0 0-5 2 6 6 0 0 0-5-2H3Z"/>',
   chat: '<path d="M20.5 11.5a8.5 8.5 0 0 1-8.5 8.5 8.3 8.3 0 0 1-3.6-.8L4 20l.8-4.2a8.5 8.5 0 1 1 15.7-4.3Z"/><path d="M8 11.5h.01m4 0h.01m4 0h.01"/>',
-  menu: '<path d="M4 6h16M4 12h16M4 18h16"/>'
+  menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  wallet: '<path d="M4 7a2 2 0 0 1 2-2h12v4"/><rect x="3" y="9" width="18" height="11" rx="2"/><path d="M16 14.5h.01"/>',
+  history: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5m4-1v5l3 2"/>'
 };
 const icon = name => `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name]}</svg>`;
 const roleName = { admin: '최고관리자', operator: '실행사', agency: '대행사', advertiser: '광고주', participant: '참여자' };
 const kinds = { quiz: '브랜드 퀴즈', survey: '설문 조사' };
-const statuses = { pending: '심사 대기', active: '진행 중', upcoming: '시작 예정', settling: '검수 후 정산', paused: '일시중지', closed: '종료', approved: '승인', rejected: '반려' };
-const ledgerNames = { opening: '테스트 잔액', charge: '충전 승인', reserve: '광고 예산 배정', release: '미집행 예산 반환', commission: '대행사 충전 수익', mission: '미션 보상' };
+const statuses = { pending: '심사 대기', active: '진행 중', upcoming: '시작 예정', settling: '검수 후 정산', paused: '일시중지', closed: '종료', approved: '승인', rejected: '반려', canceled: '취소', suspended: '이용 정지' };
+const ledgerNames = { opening: '테스트 잔액', charge: '충전 승인', reserve: '광고 예산 배정', release: '미집행 예산 반환', commission: '대행사 충전 수익', mission: '미션 보상', payout: '출금 신청', payout_return: '출금 반환' };
+const isBusiness = user => ['advertiser', 'agency', 'operator'].includes(user?.role);
 const backgrounds = {
   grove: '봄날의 골목 상점', tide: '바닷가 카페', lilac: '라일락 책방', sunset: '노을빛 마켓', night: '저녁의 꽃가게',
   studio: '광고 기획 스튜디오', creator: '콘텐츠 촬영 스튜디오', city: '도심 속 브랜드 광고', showroom: '브랜드 쇼룸', growth: '캠페인 성장 가든'
@@ -51,7 +55,8 @@ const faq = [
   ['같은 미션에 여러 번 참여할 수 있나요?', '각 미션은 계정당 한 번 참여할 수 있어요. 마감됐거나 이미 제출한 미션은 다시 참여할 수 없습니다.'],
   ['광고는 어떻게 주문하나요?', '광고주·대행사·실행사 계정으로 로그인하고 잔액을 충전한 뒤 주문서를 제출하세요. 승인된 캠페인은 지정 기간에 오퍼월에 표시됩니다.'],
   ['예상 집행비는 어떻게 계산하나요?', '주문 등록 화면에 선택한 미션의 건당 단가와 목표 완료 건수에 따른 집행비가 표시됩니다. 캠페인 종료·정산 시 미집행분은 잔액으로 반환됩니다.'],
-  ['실행사는 하위 대행사를 어떻게 관리하나요?', '실행사 대시보드에서 하위 대행사를 등록하고, 승인된 충전에서 적립된 수익과 당시 적용률을 수익 원장에서 확인할 수 있습니다.']
+  ['실행사는 하위 대행사를 어떻게 관리하나요?', '실행사 대시보드에서 하위 대행사를 등록하고, 승인된 충전에서 적립된 수익과 당시 적용률을 수익 원장에서 확인할 수 있습니다.'],
+  ['모은 포인트는 어떻게 받나요?', '보상 내역 화면에서 5,000P 이상부터 출금을 신청할 수 있어요. 운영팀이 확인한 뒤 입력한 계좌로 보내 드리며, 반려되면 포인트가 그대로 돌아옵니다.']
 ];
 const missionTypes = [
   { key: 'quiz', icon: 'star', title: '브랜드 퀴즈', intro: '브랜드 이야기를 읽고 정답을 맞혀요.', time: '약 1분', processing: '정답이면 바로 적립' },
@@ -96,8 +101,10 @@ function showToast(message) {
 }
 
 async function reload() {
+  const scroll = window.scrollY;
   state = await api('/api/state');
   render();
+  window.scrollTo(0, scroll);
 }
 
 function go(url) {
@@ -132,15 +139,21 @@ function profileAvatar(user, size = '') {
   return `<span class="profile-avatar ${size}" aria-hidden="true">${image}</span>`;
 }
 
+const seenKey = 'adsform-notice-seen';
+const seenNotice = () => { try { return Number(localStorage.getItem(seenKey)) || 0; } catch { return 0; } };
+const latestNotice = () => Math.max(0, ...(state.notices || []).map(item => item.id));
+
 function nav() {
   const user = state.user;
+  const unread = latestNotice() > seenNotice();
   $('#header').innerHTML = `<a class="logo" href="/" aria-label="애즈폼 홈">${brandMark}${wordmark}<span class="logo-ko">애즈폼</span></a>
-    <div class="header-actions"><button type="button" class="icon-btn" data-guide aria-label="이용 안내">${icon('bell')}</button>
+    <div class="header-actions"><button type="button" class="icon-btn" data-guide aria-label="이용 안내">${icon('help')}</button>
+    <button type="button" class="icon-btn notice-bell" data-notices aria-label="공지사항${unread ? ' · 새 공지 있음' : ''}">${icon('bell')}${unread ? '<i class="unread-dot"></i>' : ''}</button>
     <a href="${user ? '/manage' : '/login'}" class="login-link">${user ? profileAvatar(user, 'avatar-small') + esc(roleName[user.role]) : '로그인'}${icon('chevron')}</a></div>`;
   const participant = user?.role === 'participant';
   const links = [
     ['/', 'home', '홈'], ['/missions', 'target', '참여'],
-    [participant ? '/manage?tab=rewards' : '/manage', participant ? 'gift' : 'bag', participant ? '보상' : '광고 관리'],
+    [participant ? '/manage?tab=rewards' : user ? '/manage' : '/login', participant ? 'gift' : 'bag', participant ? '보상' : user ? '대시보드' : '광고 관리'],
     ['/#guide', 'book', '이용방법', true], ['/#faq', 'help', 'FAQ'],
     [user ? '/manage?tab=profile' : '/login', 'user', '내 정보']
   ];
@@ -151,6 +164,15 @@ function nav() {
       ${glyph === 'user' && user ? profileAvatar(user) : `<span class="nav-icon">${icon(glyph)}</span>`}<span>${text}</span></a>`;
   }).join('') + '<span class="rail-wordmark rail-only" aria-hidden="true">ADSFORM</span>';
   $('#support').innerHTML = `<button type="button" class="support-button" data-support>${icon('chat')}<span>문의하기</span></button>`;
+}
+
+function openNotices() {
+  const items = state.notices || [];
+  modal('NOTICE', '공지사항', items.length
+    ? items.map(item => `<details class="notice-item"${item.pinned ? ' open' : ''}><summary>${item.pinned ? '<span class="pin">고정</span>' : ''}<b>${esc(item.title)}</b><small>${day(item.created)}</small></summary><p>${esc(item.body)}</p></details>`).join('')
+    : empty('등록된 공지가 없어요.'));
+  try { localStorage.setItem(seenKey, String(latestNotice())); } catch { /* 저장소를 쓸 수 없으면 표시만 유지합니다. */ }
+  $('.notice-bell .unread-dot')?.remove();
 }
 
 function bannerCopy(banner) {
@@ -210,7 +232,8 @@ function missionCard(mission) {
 
 function home() {
   const participant = state.user?.role === 'participant';
-  const rewardsUrl = participant ? '/manage?tab=rewards' : '/login?next=rewards';
+  const business = isBusiness(state.user);
+  const rewardsUrl = participant ? '/manage?tab=rewards' : state.user ? '/missions' : '/login?next=rewards';
   const available = state.missions.filter(mission => !mission.mine && (mission.remaining > 0 || mission.reservedUntil));
   const featured = (available.length ? available : state.missions).slice(0, 4);
   return `<div class="content home-page">
@@ -220,8 +243,8 @@ function home() {
       ${[
         ['/missions?kind=quiz', 'star', '퀴즈', 'mint'],
         ['/missions?kind=survey', 'survey', '설문', 'violet'],
-        [rewardsUrl, 'gift', '내 보상', 'peach'],
-        ['/manage?tab=new', 'bag', '광고 주문', 'yellow']
+        state.user && !participant ? ['/manage', 'grid', '대시보드', 'peach'] : [rewardsUrl, 'gift', '내 보상', 'peach'],
+        state.user?.role === 'participant' || state.user?.role === 'admin' ? ['/#faq', 'help', 'FAQ', 'yellow'] : ['/manage?tab=new', 'bag', '광고 주문', 'yellow']
       ].map(([href, name, text, tone]) => `<a href="${href}"><span class="quick-icon ${tone}">${icon(name)}</span>${text}</a>`).join('')}
     </div>
     <section class="home-missions home-section">
@@ -252,12 +275,12 @@ function home() {
     <section class="reward-story home-section">
       <img src="/assets/home-reward.webp" alt="" width="1200" height="800" loading="lazy">
       <div><span class="eyebrow">MY REWARDS</span><h2>${participant ? `나의 보상 ${format(state.balances.reward)} P` : '모은 포인트를 한눈에'}</h2>
-        <p>참여한 미션의 심사 결과와 적립된 포인트를 보상 내역에서 확인할 수 있어요.</p>
-        <a class="btn primary" href="${rewardsUrl}">보상 내역 보기 ${icon('arrow')}</a></div>
+        <p>참여한 미션의 심사 결과와 적립된 포인트를 보상 내역에서 확인하고, 5,000P부터 출금을 신청할 수 있어요.</p>
+        ${state.user && !participant ? '<p class="form-hint">보상 내역은 참여자 계정에서 볼 수 있어요.</p>' : `<a class="btn primary" href="${rewardsUrl}">보상 내역 보기 ${icon('arrow')}</a>`}</div>
     </section>
     <section class="home-section business-story">
       <div class="business-banner"><div><span class="eyebrow">ADSFORM FOR BUSINESS</span><h2>고객의 답변으로<br>다음 캠페인을 준비하세요</h2>
-        <p>브랜드 퀴즈로 이야기를 전하고, 설문으로 고객의 선택 이유를 알아보세요.</p><a class="btn" href="/manage?tab=new">광고 주문하기 ${icon('arrow')}</a></div>
+        <p>브랜드 퀴즈로 이야기를 전하고, 설문으로 고객의 선택 이유를 알아보세요.</p><a class="btn" href="${business || !state.user ? '/manage?tab=new' : '/signup?role=advertiser'}">${business || !state.user ? '광고 주문하기' : '광고주로 가입하기'} ${icon('arrow')}</a></div>
         <img src="/assets/home-business.webp" alt="매장에서 고객 설문을 살펴보는 소상공인" width="1200" height="800" loading="lazy"></div>
       <div class="business-roles">${[
         ['bag', '광고주', '미션 유형과 목표 건수를 정하고 캠페인을 주문해요.'],
@@ -271,7 +294,7 @@ function home() {
     </section>
     <section class="faq home-section" id="faq" tabindex="-1"><span class="eyebrow">HELP CENTER</span><h2>자주 묻는 질문</h2>${faq.map(([q, a]) => `<details><summary>${q}</summary><p>${a}</p></details>`).join('')}</section>
     <section class="home-contact"><span class="quick-icon mint">${icon('chat')}</span><div><h2>궁금한 점이 있으신가요?</h2><p>미션, 포인트, 광고 주문에 관한 문의를 남겨주세요.</p></div>${btn('문의하기', 'type="button" data-support', 'quiet')}</section>
-    <footer class="home-footer"><a class="logo" href="/" aria-label="애즈폼 홈">${brandMark}${wordmark}</a><small>${slogan}</small><nav aria-label="하단 안내"><a href="/missions">오퍼월</a><a href="/#guide">이용방법</a><a href="/#faq">FAQ</a></nav>${state.demo ? '<small>로컬 데모 · 테스트 포인트</small>' : ''}</footer>
+    <footer class="home-footer"><a class="logo" href="/" aria-label="애즈폼 홈">${brandMark}${wordmark}</a><small>${slogan}</small><nav aria-label="하단 안내"><a href="/missions">오퍼월</a><a href="/#guide">이용방법</a><a href="/#faq">FAQ</a><a href="/terms">이용약관</a><a href="/privacy"><b>개인정보처리방침</b></a></nav>${state.demo ? '<small>로컬 데모 · 테스트 포인트</small>' : ''}</footer>
   </div>`;
 }
 
@@ -287,31 +310,65 @@ function missions(params) {
 function login(params) {
   const next = params.get('next');
   const demoRoles = [['participant', 'gift'], ['advertiser', 'bag'], ['agency', 'people'], ['operator', 'grid'], ['admin', 'lock']];
-  return `<div class="content login-page">${pageHead('WELCOME TO ADSFORM', '애즈폼에 오신 것을\n환영해요'.replace('\n', '<br>'), '계정으로 로그인하고 미션과 광고를 관리하세요.')}
+  const current = state.user ? `<p class="notice">현재 ${esc(state.user.name)}(${roleName[state.user.role]}) 계정으로 로그인되어 있어요. <a href="/manage">대시보드로 가기</a></p>` : '';
+  return `<div class="content login-page">${pageHead('WELCOME TO ADSFORM', '애즈폼에 오신 것을<br>환영해요', '계정으로 로그인하고 미션과 광고를 관리하세요.')}
+    ${current}
     <form data-form="login" class="form panel">
       ${field('아이디', 'username', 'text', 'autocomplete="username" required placeholder="아이디를 입력하세요"')}
       ${field('비밀번호', 'password', 'password', 'autocomplete="current-password" required placeholder="비밀번호를 입력하세요"')}
       ${btn('로그인', 'type="submit"')}${next ? '<p class="form-hint">로그인 후 요청하신 화면으로 이동합니다.</p>' : ''}
+      <p class="form-hint center">아직 계정이 없나요? <a href="/signup${next ? '?next=' + encodeURIComponent(next) : ''}">회원가입</a> · 비밀번호를 잊었다면 <button type="button" class="link-button" data-support>문의하기</button></p>
     </form>
     ${state.demo ? `<section class="demo-login"><div class="section-head"><div><span class="eyebrow">DEMO ACCESS</span><h2>테스트 계정으로 둘러보기</h2></div></div>
       <p>역할을 선택하면 비밀번호 입력 없이 로그인합니다.</p><div class="demo-grid">${demoRoles.map(([role, name]) => `<button type="button" data-demo="${role}">${icon(name)}<strong>${roleName[role]}</strong>${icon('chevron')}</button>`).join('')}</div></section>` : ''}</div>`;
 }
 
-function account() {
-  const user = state.user;
-  const isParticipant = user.role === 'participant';
-  const wallet = isParticipant ? 'reward' : 'credit';
-  const entries = state.ledger.filter(entry => entry.wallet === wallet);
-  return `<div class="content">${pageHead('MY ADSFORM', esc(user.name), `${roleName[user.role]} · ${esc(user.username)}`)}
-    <section class="panel account-profile">${profileImageEditor(user)}</section>
-    <div class="balance-card"><div>${icon(isParticipant ? 'gift' : 'card')}<span>${isParticipant ? '보유 포인트' : '광고 잔액'}</span></div><strong>${format(state.balances[wallet])}<small> ${isParticipant ? 'P' : '원'}</small></strong>
-      <a href="${isParticipant ? '/missions' : '/manage'}">${isParticipant ? '미션 둘러보기' : '관리 화면 열기'} ${icon('arrow')}</a></div>
-    ${isParticipant ? `<section class="section"><h2>내 참여 내역</h2>${state.submissions.length ? state.submissions.map(s => `<div class="record"><div><b>${esc(s.title)}</b><small>${esc(s.reason || day(s.created))}</small></div>${badge(s.status)}</div>`).join('') : empty('아직 참여한 미션이 없어요.')}</section>` : ''}
-    <section class="section"><h2>${isParticipant ? '포인트 적립 내역' : '잔액 내역'}</h2>
-      ${entries.length ? entries.map(item => `<div class="record"><div><b>${ledgerNames[item.kind]}</b><small>${day(item.created)}</small></div><strong class="credit">${item.amount > 0 ? '+' : ''}${format(item.amount)} ${isParticipant ? 'P' : '원'}</strong></div>`).join('') : empty('아직 기록이 없어요.')}</section>
-    ${btn('로그아웃', 'type="button" data-logout', 'quiet')}${state.demo ? '<a class="switch-role" href="/login">다른 테스트 계정 선택</a>' : ''}
-  </div>`;
+function signup(params) {
+  const chosen = params.get('role') === 'advertiser' || params.get('next') === 'order' ? 'advertiser' : 'participant';
+  return `<div class="content login-page">${pageHead('JOIN ADSFORM', '애즈폼 회원가입', '참여자는 미션으로 포인트를, 광고주는 캠페인으로 고객의 생각을 만나요.')}
+    <form data-form="signup" class="form panel">
+      <fieldset class="role-picker"><legend>가입 유형</legend>
+        ${[['participant', 'gift', '참여자', '미션에 참여하고 포인트를 모아요'], ['advertiser', 'bag', '광고주', '퀴즈·설문 캠페인을 주문해요']].map(([key, glyph, title, text]) =>
+          `<label class="product-option"><input type="radio" name="role" value="${key}"${key === chosen ? ' checked' : ''}><span class="mission-icon ${key === 'participant' ? 'quiz' : 'survey'}">${icon(glyph)}</span><span class="product-copy"><b>${title}</b><small>${text}</small></span></label>`).join('')}
+      </fieldset>
+      ${field('이름 또는 상호', 'name', 'text', 'required maxlength="60" autocomplete="name"')}
+      ${field('아이디', 'username', 'text', 'required minlength="4" maxlength="32" pattern="[a-z0-9][a-z0-9._\\-]+" autocomplete="username" placeholder="영문 소문자·숫자 4자 이상"')}
+      ${field('비밀번호', 'password', 'password', 'required minlength="10" maxlength="128" autocomplete="new-password" placeholder="영문과 숫자를 함께 10자 이상"')}
+      <label class="check"><input type="checkbox" name="agree" required> <span><a href="/terms" target="_blank">이용약관</a>과 <a href="/privacy" target="_blank">개인정보처리방침</a>에 동의합니다.</span></label>
+      ${btn('가입하고 시작하기', 'type="submit"')}
+      <p class="form-hint center">이미 계정이 있나요? <a href="/login">로그인</a></p>
+    </form></div>`;
 }
+
+const policyDate = '2026년 11월 11일';
+function terms() {
+  const items = [
+    ['목적', '이 약관은 애즈폼(이하 “서비스”)이 제공하는 브랜드 퀴즈·설문 미션, 포인트 적립, 광고 주문 기능의 이용 조건과 절차를 정합니다.'],
+    ['계정', '회원은 정확한 정보로 가입해야 하며, 계정과 비밀번호를 타인과 공유할 수 없습니다. 운영팀이 만든 계정은 첫 로그인 후 비밀번호를 바꿔야 합니다.'],
+    ['미션과 포인트', '각 미션은 계정당 한 번 참여할 수 있습니다. 퀴즈는 정답이면 바로, 설문은 검수 후 승인되면 포인트가 적립됩니다. 부정한 방법으로 얻은 포인트는 회수될 수 있습니다.'],
+    ['포인트 출금', '포인트는 5,000P부터 출금을 신청할 수 있고, 1P는 1원으로 계산합니다. 운영팀이 신청 내용을 확인한 뒤 지급하며, 반려된 신청의 포인트는 돌려드립니다.'],
+    ['광고 주문', '광고주는 충전한 잔액으로 캠페인을 주문합니다. 주문 시 예산이 배정되고, 캠페인이 끝나면 승인되지 않은 건의 예산은 잔액으로 돌아갑니다. 심사 대기 중인 주문은 직접 취소할 수 있습니다.'],
+    ['이용 제한', '약관이나 법령을 위반하거나 서비스 운영을 방해하면 이용이 정지될 수 있습니다.'],
+    ['문의', '서비스 이용 중 궁금한 점은 화면의 문의하기로 남겨 주세요.']
+  ];
+  return policyPage('TERMS', '이용약관', items);
+}
+
+function privacy() {
+  const items = [
+    ['수집하는 항목', '회원가입: 아이디, 이름 또는 상호, 비밀번호(암호화 저장). 문의: 제목, 내용, 답변 받을 이메일(선택). 출금 신청: 받을 계좌 정보. 미션 참여: 제출한 답변과 참여 시각.'],
+    ['이용 목적', '회원 식별과 로그인, 미션 참여·포인트 적립과 출금 처리, 광고 캠페인 집행과 결과 리포트 제공, 문의 응대.'],
+    ['광고주에게 제공되는 정보', '광고주는 캠페인 리포트에서 설문 답변을 볼 수 있으며, 참여자 이름은 첫 글자만 남기고 가려서 표시합니다.'],
+    ['보관 기간', '회원 정보는 탈퇴 또는 이용 종료 시까지 보관합니다. 포인트·충전 거래 기록은 관련 법령에 따라 정해진 기간 동안 보관합니다.'],
+    ['이용자의 권리', '이용자는 언제든 자신의 정보 열람·정정·삭제를 요청할 수 있습니다. 요청은 문의하기로 접수해 주세요.'],
+    ['안전성 확보', '비밀번호는 복원할 수 없는 방식으로 암호화하고, 로그인 세션은 일정 시간이 지나면 만료됩니다.']
+  ];
+  return policyPage('PRIVACY', '개인정보처리방침', items);
+}
+
+const policyPage = (tag, title, items) => `<div class="content policy-page">${pageHead(tag, title, `시행일 ${policyDate}`)}
+  <section class="panel">${items.map(([head, text], index) => `<h2>제${index + 1}조 ${head}</h2><p>${text}</p>`).join('')}</section>
+  ${state.demo ? '<p class="notice">로컬 데모용 기본 문안입니다. 실제 서비스 오픈 전에 사업자 정보와 법률 검토 내용을 반영해 주세요.</p>' : ''}</div>`;
 
 function openMission(id) {
   const mission = state.missions.find(item => item.id === id);
@@ -323,7 +380,7 @@ function openMission(id) {
     : textarea('나의 답변', 'response', 'minlength="10" maxlength="1000" required rows="4" placeholder="10자 이상 입력해 주세요"');
   modal(kinds[mission.kind], esc(mission.title), `<p>${esc(mission.details)}</p>
     <div class="mission-summary"><strong>+${format(mission.reward)} P</strong><span>남은 자리 ${format(mission.remaining)}명</span></div>
-    ${reserved ? `<p class="notice">제출 마감 ${clockTime(mission.reservedUntil)} (한국 시간)</p>
+    ${reserved ? `<p class="notice countdown" data-deadline="${mission.reservedUntil}">남은 시간 <b data-remaining>${remainingText(mission.reservedUntil)}</b> · 제출 마감 ${clockTime(mission.reservedUntil)}</p>
       <form data-form="mission" class="form"><input type="hidden" name="id" value="${id}"><p class="question">${esc(mission.prompt)}</p>${input}${btn('미션 답변 제출', 'type="submit"')}</form>`
       : mission.mine ? `<p>${badge(mission.mine)} · 이미 제출한 미션입니다.</p>`
       : !mission.remaining ? '<p>지금은 빈자리가 없어요. 잠시 후 다시 확인해 주세요.</p>'
@@ -332,11 +389,34 @@ function openMission(id) {
       : '<a class="btn primary" href="/login?next=missions">참여자 계정으로 로그인</a>'}`);
 }
 
+const remainingText = until => {
+  const left = Math.max(0, Math.ceil((until - Date.now()) / 1000));
+  return `${Math.floor(left / 60)}분 ${String(left % 60).padStart(2, '0')}초`;
+};
+let countdownTimer;
+function tickCountdown() {
+  clearInterval(countdownTimer);
+  const node = dialog.querySelector('[data-deadline]');
+  if (!node) return;
+  countdownTimer = setInterval(() => {
+    if (!dialog.open || !node.isConnected) return clearInterval(countdownTimer);
+    const until = Number(node.dataset.deadline);
+    node.querySelector('[data-remaining]').textContent = remainingText(until);
+    node.classList.toggle('urgent', until - Date.now() < 60_000);
+    if (until <= Date.now()) {
+      clearInterval(countdownTimer);
+      node.textContent = '참여 시간이 끝나 자리가 풀렸어요. 빈자리가 있으면 다시 시작할 수 있습니다.';
+      dialog.querySelector('form[data-form="mission"]')?.remove();
+    }
+  }, 1000);
+}
+
 function modal(tag, title, body, wide = false) {
   dialog.setAttribute('aria-labelledby', 'dialog-title');
   dialog.classList.toggle('wide', wide);
   dialog.innerHTML = `<div class="dialog-inner"><form method="dialog"><button class="icon-btn dialog-close" aria-label="닫기">${icon('close')}</button></form><span class="eyebrow">${tag}</span><h2 id="dialog-title">${title}</h2>${body}<p class="dialog-error" role="alert" hidden></p></div>`;
   if (!dialog.open) dialog.showModal();
+  tickCountdown();
 }
 
 function openSupport() {
@@ -344,26 +424,26 @@ function openSupport() {
     <form class="form" data-form="inquiry">
       ${field('제목', 'subject', 'text', 'required minlength="3" maxlength="80" placeholder="문의 제목을 입력하세요"')}
       ${textarea('문의 내용', 'message', 'required minlength="10" maxlength="1200" rows="5" placeholder="10자 이상 입력해 주세요"')}
-      ${field('답변 받을 이메일 (선택)', 'email', 'email', 'maxlength="120" autocomplete="email" placeholder="name@example.com"')}
-      <p class="form-hint">입력한 이메일은 문의 확인과 답변에 사용됩니다.</p>
+      ${field(state.user ? '답변 받을 이메일 (선택)' : '답변 받을 이메일', 'email', 'email', `maxlength="120" autocomplete="email" placeholder="name@example.com"${state.user ? '' : ' required'}`)}
+      <p class="form-hint">${state.user ? '답변은 프로필 화면의 ‘내 문의’에서 확인할 수 있어요.' : '비회원 문의의 답변은 입력한 이메일로 보내 드립니다.'} 입력한 정보는 문의 응대에만 사용합니다. <a href="/privacy">개인정보처리방침</a></p>
       ${btn('문의 접수', 'type="submit"')}
     </form>`);
 }
 
 const consoleNav = {
   admin: [
-    ['운영', [['overview', '운영 대시보드', 'grid'], ['orders', '주문 심사', 'bag'], ['submissions', '미션 검수', 'survey'], ['charges', '충전 승인', 'card']]],
-    ['설정', [['partners', '계정·수익률', 'people'], ['notices', '공지사항', 'bell'], ['design', 'PC 배경', 'star'], ['inquiries', '문의 내역', 'chat']]]
+    ['운영', [['overview', '운영 대시보드', 'grid'], ['orders', '주문 심사', 'bag'], ['submissions', '미션 검수', 'survey'], ['charges', '충전 승인', 'card'], ['payouts', '출금 승인', 'wallet']]],
+    ['설정', [['partners', '계정·수익률', 'people'], ['notices', '공지사항', 'bell'], ['inquiries', '문의 내역', 'chat'], ['audit', '운영 기록', 'history'], ['design', 'PC 배경', 'star']]]
   ],
   participant: [
-    ['내 활동', [['overview', '참여 대시보드', 'grid'], ['history', '참여 내역', 'survey'], ['rewards', '보상 내역', 'gift']]]
+    ['내 활동', [['overview', '참여 대시보드', 'grid'], ['history', '참여 내역', 'survey'], ['rewards', '보상·출금', 'gift']]]
   ],
   business: [
     ['캠페인', [['overview', '광고 대시보드', 'grid'], ['new', '주문 등록', 'target'], ['orders', '주문 내역', 'bag']]],
     ['예산', [['charges', '잔액 충전', 'card'], ['ledger', '잔액 내역', 'book']]]
   ],
   operator: [
-    ['파트너', [['agencies', '하위 대행사', 'people'], ['revenue', '수익 원장', 'gift']]]
+    ['파트너', [['agencies', '하위 대행사', 'people'], ['revenue', '수익·출금', 'gift']]]
   ]
 };
 
@@ -512,26 +592,64 @@ function campaignTable(list, { owner = false, limit = 8 } = {}) {
   </tbody></table></div>`;
 }
 
-function runningLedger(wallet, unit, limit = 100) {
-  let after = state.balances[wallet];
-  return state.ledger.filter(item => item.wallet === wallet).slice(0, limit).map(item => {
-    const row = { ...item, after };
-    after -= item.amount;
-    return row;
-  });
-}
-
-function ledgerRows(wallet, unit, limit) {
-  const rows = runningLedger(wallet, unit, limit);
+function ledgerTable(rows, unit) {
   if (!rows.length) return empty('아직 기록이 없어요.');
   return `<div class="table-wrap"><table class="data-table compact"><thead><tr><th>일시</th><th>구분</th><th>내용</th><th class="num">금액</th><th class="num">잔액</th></tr></thead><tbody>
-    ${rows.map(item => {
-      const order = state.campaigns?.find(c => String(c.id) === item.ref);
-      const memo = order ? esc(order.title) : item.kind === 'opening' ? '데모 시작 잔액' : item.kind === 'charge' ? `충전 #${esc(item.ref)}` : item.kind === 'mission' ? `제출 #${esc(item.ref)}` : esc(item.ref);
-      return `<tr><td><small>${dateTime(item.created)}</small></td><td><span class="kind-chip ${item.amount < 0 ? 'out' : 'in'}">${ledgerNames[item.kind] || item.kind}</span></td><td>${memo}</td>
-      <td class="num ${item.amount < 0 ? 'minus' : 'plus'}">${item.amount > 0 ? '+' : ''}${format(item.amount)}${unit}</td><td class="num">${format(item.after)}${unit}</td></tr>`;
-    }).join('')}</tbody></table></div>`;
+    ${rows.map(item => `<tr><td><small>${dateTime(item.created)}</small></td><td><span class="kind-chip ${item.amount < 0 ? 'out' : 'in'}">${ledgerNames[item.kind] || esc(item.kind)}</span></td><td>${esc(item.memo || item.ref)}</td>
+      <td class="num ${item.amount < 0 ? 'minus' : 'plus'}">${item.amount > 0 ? '+' : ''}${format(item.amount)}${unit}</td><td class="num">${format(item.after)}${unit}</td></tr>`).join('')}</tbody></table></div>`;
 }
+
+const ledgerRows = (wallet, unit, limit = 30) => ledgerTable(state.ledger.filter(item => item.wallet === wallet).slice(0, limit), unit);
+
+function pager(page, pages, base) {
+  if (pages <= 1) return '';
+  const link = (n, text, label = '') => `<a href="${base}${base.includes('?') ? '&amp;' : '?'}page=${n}"${n === page ? ' aria-current="page"' : ''}${label ? ` aria-label="${label}"` : ''}>${text}</a>`;
+  const from = Math.max(1, Math.min(page - 2, pages - 4));
+  const numbers = Array.from({ length: Math.min(5, pages) }, (_, i) => from + i);
+  return `<nav class="pager" aria-label="페이지">${page > 1 ? link(page - 1, '‹', '이전 페이지') : ''}${numbers.map(n => link(n, n)).join('')}${page < pages ? link(page + 1, '›', '다음 페이지') : ''}</nav>`;
+}
+
+const query = (params, keys) => keys.filter(key => params.get(key)).map(key => `${key}=${encodeURIComponent(params.get(key))}`).join('&amp;');
+const asyncSlot = (name, params) => `<div class="async-slot" data-async="${name}" data-query="${esc(params.toString())}"><p class="loading">불러오는 중입니다.</p></div>`;
+const asyncViews = {};
+
+async function hydrate() {
+  for (const slot of document.querySelectorAll('[data-async]')) {
+    const name = slot.dataset.async;
+    slot.removeAttribute('data-async');
+    try {
+      slot.innerHTML = await asyncViews[name](new URLSearchParams(slot.dataset.query));
+    } catch (error) {
+      slot.innerHTML = empty(esc(error.message));
+    }
+    labelTables(slot);
+  }
+}
+
+// 좁은 화면에서는 표를 카드처럼 보여 주기 위해 각 칸에 머리글을 붙입니다.
+function labelTables(root = document) {
+  for (const table of root.querySelectorAll('.data-table')) {
+    const heads = [...table.querySelectorAll('thead th')].map(th => th.textContent.trim());
+    for (const row of table.querySelectorAll('tbody tr')) {
+      [...row.children].forEach((cell, index) => {
+        if (cell.dataset.label !== undefined) return;
+        cell.dataset.label = heads[index] || '';
+        cell.innerHTML = `<div class="cell">${cell.innerHTML}</div>`;
+      });
+    }
+  }
+}
+
+asyncViews.ledger = async params => {
+  const wallet = params.get('wallet');
+  const unit = wallet === 'reward' ? 'P' : '원';
+  const data = await api(`/api/ledger?wallet=${wallet}&page=${params.get('page') || 1}`);
+  const base = `/manage?tab=${params.get('tab')}`;
+  return `<div class="summary-strip">${[['현재 잔액', `${format(data.balance)}${unit}`], ['들어온 금액', `${data.income ? '+' : ''}${format(data.income)}${unit}`], ['나간 금액', `${data.outgo ? '−' : ''}${format(data.outgo)}${unit}`], ['전체 기록', `${format(data.count)}건`]]
+    .map(([label, value]) => `<div><span>${label}</span><b>${value}</b></div>`).join('')}</div>
+    <section class="panel dash-block">${panelHead(params.get('title') || '내역', data.count ? `${format(data.count)}건 중 ${format((data.page - 1) * 20 + 1)}~${format(Math.min(data.page * 20, data.count))}번째 · 거래 후 잔액 포함` : '거래 후 잔액 포함')}
+    ${ledgerTable(data.items, unit)}${pager(data.page, data.pages, base)}</section>`;
+};
 
 /* ---------- 참여자 ---------- */
 const levels = [[0, '새싹', 5], [5, '잎새', 15], [15, '나무', 40], [40, '숲', Infinity]];
@@ -585,7 +703,7 @@ function businessOverview(user) {
   const running = orders.filter(order => campaignPhase(order) === 'active');
   const spent = sum(orders, order => order.approved * order.cost);
   const returned = sum(orders, 'returned');
-  const pendingCharges = state.charges.filter(charge => charge.status === 'pending' && charge.owner === user.name);
+  const pendingCharges = state.charges.filter(charge => charge.status === 'pending' && charge.user_id === user.id);
   return `<section class="dash-hero"><div class="dash-hero-main"><span class="eyebrow">CAMPAIGN CENTER</span>
       <h2>${esc(user.name)}님, 오늘 캠페인 현황이에요</h2>
       <div class="hero-balance"><span>사용 가능 잔액</span><strong>${format(state.balances.credit)}<small> 원</small></strong>${pendingCharges.length ? `<em>충전 승인 대기 ${format(sum(pendingCharges, 'amount'))}원</em>` : ''}</div>
@@ -632,6 +750,7 @@ function adminOverview() {
     ['주문 심사', pendingOrders.length, '/manage?tab=orders&status=pending', 'bag'],
     ['충전 승인', pendingCharges.length, '/manage?tab=charges&status=pending', 'card'],
     ['미션 검수', state.adminCounts.pendingSubmissions, '/manage?tab=submissions&status=pending', 'survey'],
+    ['출금 승인', state.adminCounts.pendingPayouts, '/manage?tab=payouts&status=pending', 'wallet'],
     ['미확인 문의', state.adminCounts.unreadInquiries, '/manage?tab=inquiries', 'chat']
   ];
   const todo = sum(queue, item => item[1]);
@@ -646,7 +765,7 @@ function adminOverview() {
   const roles = state.roleCounts;
   return `<section class="dash-hero admin"><div class="dash-hero-main"><span class="eyebrow">OPERATION CENTER</span>
       <h2>${todo ? `오늘 처리할 업무 ${format(todo)}건` : '대기 중인 업무가 없어요'}</h2>
-      <p>심사·충전·검수·문의를 순서대로 처리하면 캠페인이 지연 없이 집행됩니다.</p>
+      <p>심사·충전·검수·출금·문의를 순서대로 처리하면 캠페인과 보상이 지연 없이 처리됩니다.</p>
       <div class="queue">${queue.map(([label, value, href, glyph]) => `<a href="${href}" class="${value ? 'on' : ''}">${icon(glyph)}<span>${label}</span><b>${format(value)}</b></a>`).join('')}</div></div>
     <dl class="hero-side">
       <div><dt>오늘 제출</dt><dd>${format((todayRow?.approved || 0) + (todayRow?.pending || 0) + (todayRow?.rejected || 0))}건</dd></div>
@@ -669,7 +788,7 @@ function adminOverview() {
         <h3 class="sub-title">계정 구성</h3><div class="role-bars">${['advertiser', 'agency', 'operator', 'participant'].map(key => `<div><span>${roleName[key]}</span>${meter(roles[key] || 0, Math.max(...Object.values(roles)), roleName[key])}<b>${format(roles[key] || 0)}</b></div>`).join('')}</div></section></div>
     <div class="dash-grid g-3-2">
       <section class="panel">${panelHead('집행액 상위 캠페인', '', moreLink('/manage?tab=orders'))}${campaignTable(top, { owner: true, limit: 6 })}</section>
-      <section class="panel">${panelHead('최근 운영 기록')}<ol class="timeline">${state.audit.slice(0, 8).map(item => `<li><b>${esc(item.action)} <small>#${esc(item.subject)}</small></b><small>${esc(item.name || '시스템')}${item.detail ? ' · ' + esc(statuses[item.detail] || roleName[item.detail] || item.detail) : ''} · ${dateTime(item.created)}</small></li>`).join('') || empty('아직 운영 기록이 없어요.')}</ol></section></div>`;
+      <section class="panel">${panelHead('최근 운영 기록', '', moreLink('/manage?tab=audit'))}<ol class="timeline">${state.audit.slice(0, 8).map(item => `<li><b>${esc(item.action)} <small>#${esc(item.subject)}</small></b><small>${esc(item.name || '시스템')}${item.detail ? ' · ' + esc(statuses[item.detail] || roleName[item.detail] || item.detail) : ''} · ${dateTime(item.created)}</small></li>`).join('') || empty('아직 운영 기록이 없어요.')}</ol></section></div>`;
 }
 
 function overview(user) {
@@ -680,13 +799,17 @@ function overview(user) {
 
 /* ---------- 주문 ---------- */
 const actions = {
-  approve: '승인', reject: '반려', pause: '일시중지', resume: '재개', close: '종료·정산'
+  approve: '승인', reject: '반려', pause: '일시중지', resume: '재개', close: '종료·정산', cancel: '취소', suspend: '이용 정지', activate: '정지 해제'
 };
-const decision = (scope, id, action) => btn(actions[action], `type="button" data-decision="${scope}" data-id="${id}" data-action="${action}"`, action === 'approve' ? 'primary small' : 'quiet small');
+const decision = (scope, id, action, label = actions[action]) => btn(label, `type="button" data-decision="${scope}" data-id="${id}" data-action="${action}" data-label="${esc(label)}"`, action === 'approve' ? 'primary small' : 'quiet small');
+const findOrder = id => state.campaigns?.find(item => item.id === id) || state.agencyCampaigns?.find(item => item.id === id);
 
 function orderCard(c, allowActions) {
   const phase = campaignPhase(c);
-  const choices = { pending: ['approve', 'reject'], upcoming: ['pause', 'close'], active: ['pause', 'close'], paused: ['resume', 'close'] }[phase] || [];
+  const mine = c.owner_id === state.user.id;
+  const choices = allowActions
+    ? { pending: ['approve', 'reject'], upcoming: ['pause', 'close'], active: ['pause', 'close'], paused: ['resume', 'close'], settling: ['close'] }[phase] || []
+    : mine ? { pending: ['cancel'], upcoming: ['pause', 'close'], active: ['pause', 'close'], paused: c.reason === '운영자 일시중지' ? ['close'] : ['resume', 'close'], settling: ['close'] }[phase] || [] : [];
   const rate = percent(c.approved, c.approved + c.rejected);
   return `<article class="panel order-card"><div class="row-top"><span class="eyebrow">${kinds[c.kind]} · #${c.id}${c.owner && allowActions ? ' · ' + esc(c.owner) : ''}</span>${badge(phase)}</div>
     <h3><button class="console-text-button" type="button" data-order="${c.id}">${esc(c.title)}</button></h3>
@@ -698,8 +821,9 @@ function orderCard(c, allowActions) {
     ${c.memo ? `<p class="order-memo">${icon('book')} ${esc(c.memo)}</p>` : ''}
     ${c.reason ? `<p class="order-note ${c.status === 'rejected' ? 'error-inline' : ''}">${esc(c.reason)}</p>` : ''}
     <div class="actions">${btn('상세 리포트', `type="button" data-order="${c.id}"`, 'quiet small')}
-      ${c.owner_id === state.user.id ? `<a class="btn quiet small" href="/manage?tab=new&amp;copy=${c.id}">같은 조건으로 재주문</a>` : ''}
-      ${allowActions ? choices.map(a => decision('campaign/decision', c.id, a)).join('') : ''}</div></article>`;
+      ${mine && c.status === 'pending' ? btn('주문 내용 수정', `type="button" data-edit-order="${c.id}"`, 'quiet small') : ''}
+      ${mine ? `<a class="btn quiet small" href="/manage?tab=new&amp;copy=${c.id}">같은 조건으로 재주문</a>` : ''}
+      ${choices.map(a => decision('campaign/decision', c.id, a, a === 'cancel' ? '주문 취소' : actions[a])).join('')}</div></article>`;
 }
 
 function orders(params, admin) {
@@ -711,7 +835,7 @@ function orders(params, admin) {
   const base = state.campaigns.filter(c => (!q || `${c.title} ${c.brand} ${c.owner || ''} ${c.id}`.toLowerCase().includes(q)) && (!kind || c.kind === kind) && (!since || c.created.slice(0, 10) >= since));
   const list = base.filter(c => filter === 'all' || campaignPhase(c) === filter);
   const keep = key => [['q', params.get('q')], ['kind', kind], ['period', period], ['status', key]].filter(([, v]) => v).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&amp;');
-  const tabs = [['all', '전체'], ['pending', '대기'], ['upcoming', '예정'], ['active', '진행'], ['paused', '중지'], ['settling', '정산 대기'], ['closed', '종료'], ['rejected', '반려']];
+  const tabs = [['all', '전체'], ['pending', '대기'], ['upcoming', '예정'], ['active', '진행'], ['paused', '중지'], ['settling', '정산 대기'], ['closed', '종료'], ['rejected', '반려'], ['canceled', '취소']];
   return `<div class="summary-strip">${[
       ['조회 캠페인', `${format(list.length)}건`], ['목표 합계', `${format(sum(list, 'goal'))}건`], ['승인 합계', `${format(sum(list, 'approved'))}건`],
       ['집행액', `${format(sum(list, c => c.approved * c.cost))}원`], ['배정 예산', `${format(sum(list, c => c.goal * c.cost))}원`]
@@ -730,7 +854,7 @@ function orders(params, admin) {
 }
 
 async function openOrder(id) {
-  const order = state.campaigns?.find(item => item.id === id);
+  const order = findOrder(id);
   if (!order) return;
   const choices = JSON.parse(order.choices);
   const spent = order.cost * order.approved;
@@ -761,6 +885,11 @@ async function openOrder(id) {
     const report = await api('/api/report?id=' + id);
     const target = dialog.querySelector('#report-body');
     if (!target) return;
+    if (report.notStarted) {
+      target.innerHTML = `<p class="notice">${order.status === 'pending' ? '운영자 심사가 끝나면 집행이 시작됩니다.' : ['rejected', 'canceled'].includes(order.status) ? '집행되지 않은 주문입니다. 배정 예산은 잔액으로 돌아갔어요.' : `${order.start_date}부터 참여를 받습니다.`} 참여가 시작되면 일별·시간대별 리포트가 여기에 표시됩니다.</p>
+        ${report.history.length ? `<h3>처리 이력</h3><ol class="timeline">${report.history.map(item => `<li><b>${esc(item.action)}${item.detail ? ` · ${esc(statuses[item.detail] || item.detail)}` : ''}</b><small>${esc(item.name || '시스템')} · ${dateTime(item.created)}</small></li>`).join('')}</ol>` : ''}`;
+      return;
+    }
     const max = Math.max(1, ...report.hours);
     const peak = report.hours.indexOf(Math.max(...report.hours));
     const choiceTotal = sum(report.choices, 'total');
@@ -796,21 +925,54 @@ function orderForm(params) {
           <div class="two">${field('캠페인 제목', 'title', 'text', `required maxlength="80" placeholder="예시 · 로컬 브랜드 퀴즈" value="${v('title')}"`)}${field('브랜드명', 'brand', 'text', `required maxlength="50" value="${v('brand')}"`)}</div>
           ${textarea('미션 안내', 'details', 'required maxlength="500" rows="3" placeholder="참여자에게 브랜드와 미션을 소개해 주세요"')}
           ${field('참여 질문', 'prompt', 'text', `required maxlength="200" value="${v('prompt')}"`)}
-          <fieldset class="quiz-fields"><legend>퀴즈 선택지</legend>
-            ${[1, 2, 3].map(i => field('선택지 ' + i, 'option' + i, 'text', `required maxlength="60" value="${esc(choices[i - 1] || '')}"`)).join('')}
-            ${select('정답', 'answer', [[1, '선택지 1'], [2, '선택지 2'], [3, '선택지 3']])}</fieldset>
+          ${quizFields(choices)}
         </div></section>
       <section class="panel"><div class="step-head"><span>3</span><div><h2>수량과 일정</h2><p>일일 한도를 정하면 기간 동안 고르게 모집합니다.</p></div></div>
         <div class="form">
           <div class="two">${field('목표 완료 건수', 'goal', 'number', `required min="1" max="50000" value="${v('goal', 100)}"`)}${field('일일 한도 (선택)', 'daily_cap', 'number', `min="0" max="50000" placeholder="제한 없음" value="${copy?.daily_cap ?? ''}"`)}</div>
           <div class="two">${field('시작일', 'start', 'date', `required min="${today}" value="${today}"`)}${field('종료일', 'end', 'date', `required min="${today}" value="${end}"`)}</div>
           <div class="chips" aria-label="기간 빠른 선택">${[[7, '1주'], [14, '2주'], [30, '30일']].map(([n, label]) => `<button type="button" class="chip" data-span="${n}">${label}</button>`).join('')}</div>
-          ${field('운영 메모 (선택)', 'memo', 'text', `maxlength="300" placeholder="광고주만 볼 수 있는 메모" value="${v('memo')}"`)}
+          ${field('운영 메모 (선택)', 'memo', 'text', `maxlength="300" placeholder="주문자와 애즈폼 운영팀만 보는 메모" value="${v('memo')}"`)}
         </div></section>
     </div>
     <aside class="order-aside"><section class="panel quote-panel"><span class="eyebrow">ESTIMATE</span><h2>견적 요약</h2><div class="quote" aria-live="polite"></div>
-      ${btn('견적 확인 및 주문 제출', 'type="submit"')}<p class="form-hint">제출하면 예산이 배정되고 운영자 심사 후 집행됩니다. 종료 시 미집행분은 자동 반환돼요.</p></section></aside>
+      ${btn('견적 확인 및 주문 제출', 'type="submit"')}<p class="form-hint">제출하면 예산이 배정되고 운영자 심사 후 집행됩니다. 심사 전에는 직접 취소할 수 있고, 종료 시 미집행분은 자동 반환돼요.</p></section></aside>
+    <div class="quote-sticky"><div><small>예상 집행비</small><b data-quote-total>0원</b></div>${btn('주문 제출', 'type="submit"', 'primary small')}</div>
   </form>`;
+}
+
+function quizFields(choices = [], answer = 0) {
+  return `<fieldset class="quiz-fields"><legend>퀴즈 선택지 <small>2~5개 · 비워 둔 칸은 제외돼요</small></legend>
+    ${[1, 2, 3, 4, 5].map(i => field(`선택지 ${i}${i > 2 ? ' (선택)' : ''}`, 'option' + i, 'text', `${i <= 2 ? 'required ' : ''}maxlength="60" value="${esc(choices[i - 1] || '')}"`)).join('')}
+    ${select('정답', 'answer', [1, 2, 3, 4, 5].map(i => [i, '선택지 ' + i]))}</fieldset>`;
+}
+
+function syncAnswerOptions(form) {
+  const answer = form.elements.answer;
+  if (!answer) return;
+  for (const option of answer.options) {
+    const filled = Boolean(form.elements['option' + option.value]?.value.trim());
+    option.disabled = !filled;
+    option.textContent = filled ? `선택지 ${option.value} · ${form.elements['option' + option.value].value.trim().slice(0, 20)}` : `선택지 ${option.value} (비어 있음)`;
+  }
+  if (answer.selectedOptions[0]?.disabled) answer.value = [...answer.options].find(option => !option.disabled)?.value || '1';
+}
+
+function openEditOrder(id) {
+  const order = findOrder(id);
+  if (!order) return;
+  const choices = JSON.parse(order.choices);
+  modal(`${kinds[order.kind]} · #${order.id}`, '주문 내용 수정', `<p>심사 대기 중에는 문구와 선택지를 고칠 수 있어요. 수량·기간을 바꾸려면 주문을 취소하고 다시 주문해 주세요.</p>
+    <form class="form" data-form="campaign/edit"><input type="hidden" name="id" value="${order.id}">
+      ${field('캠페인 제목', 'title', 'text', `required maxlength="80" value="${esc(order.title)}"`)}${field('브랜드명', 'brand', 'text', `required maxlength="50" value="${esc(order.brand)}"`)}
+      ${textarea('미션 안내', 'details', 'required maxlength="500" rows="3"')}${field('참여 질문', 'prompt', 'text', `required maxlength="200" value="${esc(order.prompt)}"`)}
+      ${order.kind === 'quiz' ? quizFields(choices) : ''}${btn('수정 내용 저장', 'type="submit"')}</form>`, true);
+  const form = dialog.querySelector('form[data-form]');
+  form.elements.details.value = order.details;
+  if (order.kind === 'quiz') {
+    form.elements.answer.value = String(order.answer + 1);
+    syncAnswerOptions(form);
+  }
 }
 
 function updateOrderForm(form) {
@@ -819,6 +981,7 @@ function updateOrderForm(form) {
   const fields = form.querySelector('.quiz-fields');
   fields.hidden = !quiz;
   fields.disabled = !quiz;
+  syncAnswerOptions(form);
   const { cost, reward } = state.products[kind];
   const goal = Math.max(0, Number(form.elements.goal.value || 0));
   const cap = Number(form.elements.daily_cap.value || 0);
@@ -828,6 +991,8 @@ function updateOrderForm(form) {
   const total = cost * goal;
   const after = state.balances.credit - total;
   const capShort = cap && days && cap * days < goal;
+  const sticky = form.querySelector('[data-quote-total]');
+  if (sticky) sticky.textContent = `${format(total)}원${after < 0 ? ' · 잔액 부족' : ''}`;
   form.querySelector('.quote').innerHTML = `<dl>
       <div><dt>상품</dt><dd>${kinds[kind]}</dd></div>
       <div><dt>건당 단가</dt><dd>${format(cost)}원</dd></div>
@@ -845,27 +1010,29 @@ function updateOrderForm(form) {
 /* ---------- 예산 ---------- */
 function charges(params, admin) {
   const status = params.get('status') || 'all';
-  const list = state.charges.filter(charge => status === 'all' || charge.status === status);
-  const approved = state.charges.filter(charge => charge.status === 'approved');
-  const pending = state.charges.filter(charge => charge.status === 'pending');
+  // 실행사는 하위 대행사 충전도 내려받지만, 이 화면에는 본인 신청만 보여 줍니다.
+  const own = admin ? state.charges : state.charges.filter(charge => charge.user_id === state.user.id);
+  const list = own.filter(charge => status === 'all' || charge.status === status);
+  const approved = own.filter(charge => charge.status === 'approved');
+  const pending = own.filter(charge => charge.status === 'pending');
   return `<div class="summary-strip">${[
       [admin ? '승인 대기' : '승인 대기 금액', admin ? `${format(pending.length)}건 · ${format(sum(pending, 'amount'))}원` : `${format(sum(pending, 'amount'))}원`],
       ['누적 승인액', `${format(sum(approved, 'amount'))}원`], ['승인 건수', `${format(approved.length)}건`],
       [admin ? '실행사 수익' : '사용 가능 잔액', `${format(admin ? sum(approved, 'commission') : state.balances.credit)}원`]
     ].map(([label, value]) => `<div><span>${label}</span><b>${value}</b></div>`).join('')}</div>
-    ${admin ? '' : `<section class="panel charge-panel"><div>${panelHead('광고 잔액 충전', '최고관리자가 입금을 확인하고 승인하면 잔액에 반영됩니다.')}
+    ${admin ? '' : `<section class="panel charge-panel"><div>${panelHead('광고 잔액 충전', '부가세 포함 금액을 입금하면 운영팀이 확인 후 승인하고, 충전 금액이 잔액에 반영됩니다.')}
       <form class="form" data-form="charge">${field('충전 금액 (원)', 'amount', 'number', 'required min="1000" max="10000000" step="1000" value="100000"')}
         <div class="chips">${[100000, 300000, 500000, 1000000].map(n => `<button type="button" class="chip" data-amount="${n}">+${compact(n)}</button>`).join('')}<button type="button" class="chip" data-amount="0">초기화</button></div>
         ${btn('충전 신청', 'type="submit"')}</form></div>
       <div class="charge-receipt" aria-live="polite"></div></section>
-      ${state.demo ? '<p class="notice">테스트 충전입니다. 실제로 결제되거나 입금되지 않습니다.</p>' : '<p class="notice">담당자와 입금 절차를 확인한 후 충전을 신청하세요.</p>'}`}
+      ${state.demo ? '<p class="notice">테스트 충전입니다. 실제로 결제되거나 입금되지 않습니다.</p>' : '<p class="notice">외부 결제는 아직 연결되어 있지 않습니다. 담당자와 입금 계좌를 확인한 후 신청해 주세요.</p>'}`}
     <section class="panel dash-block">${panelHead(admin ? '충전 승인 요청' : '충전 신청 내역')}
-    <div class="tabs">${[['all', '전체'], ['pending', '대기'], ['approved', '승인'], ['rejected', '반려']].map(([key, label]) => `<a href="/manage?tab=charges&amp;status=${key}" class="${key === status ? 'on' : ''}">${label} <span class="count">${format(key === 'all' ? state.charges.length : state.charges.filter(c => c.status === key).length)}</span></a>`).join('')}</div>
-    ${list.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>번호</th><th>신청일</th>${admin ? '<th>신청 계정</th>' : ''}<th class="num">충전액</th><th class="num">부가세 포함</th><th>실행사 수익</th><th>상태</th>${admin ? '<th></th>' : ''}</tr></thead><tbody>
+    <div class="tabs">${[['all', '전체'], ['pending', '대기'], ['approved', '승인'], ['rejected', '반려'], ['canceled', '취소']].map(([key, label]) => `<a href="/manage?tab=charges&amp;status=${key}" class="${key === status ? 'on' : ''}">${label} <span class="count">${format(key === 'all' ? own.length : own.filter(c => c.status === key).length)}</span></a>`).join('')}</div>
+    ${list.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>번호</th><th>신청일</th>${admin ? '<th>신청 계정</th>' : ''}<th class="num">충전액</th><th class="num">입금액(부가세 포함)</th><th>실행사 수익</th><th>상태</th><th></th></tr></thead><tbody>
       ${list.map(c => `<tr><td>#${c.id}</td><td><small>${dateTime(c.created)}</small></td>${admin ? `<td>${esc(c.owner)}<small>${roleName[c.ownerRole] || ''}</small></td>` : ''}
-        <td class="num">${format(c.amount)}원</td><td class="num"><small>${format(Math.round(c.amount * 1.1))}원</small></td>
-        <td>${c.operator ? `${esc(c.operator)}<small>${format(c.commission)}원 (${c.rate / 100}%)</small>` : '<small>−</small>'}</td><td>${badge(c.status)}</td>
-        ${admin ? `<td class="row-actions">${c.status === 'pending' ? decision('charge/decision', c.id, 'approve') + decision('charge/decision', c.id, 'reject') : ''}</td>` : ''}</tr>`).join('')}
+        <td class="num">${format(c.amount)}원</td><td class="num"><small>${format(c.amount + c.vat)}원</small></td>
+        <td>${c.operator ? `${esc(c.operator)}<small>${format(c.commission)}원 (${c.rate / 100}%)</small>` : '<small>−</small>'}</td><td>${badge(c.status)}${c.reason ? `<small>${esc(c.reason)}</small>` : ''}</td>
+        <td class="row-actions">${c.status !== 'pending' ? '' : admin ? decision('charge/decision', c.id, 'approve') + decision('charge/decision', c.id, 'reject') : decision('charge/cancel', c.id, 'cancel', '신청 취소')}</td></tr>`).join('')}
     </tbody></table></div>` : empty('충전 요청이 없습니다.')}</section>`;
 }
 
@@ -876,16 +1043,11 @@ function updateChargeForm(form) {
   if (target) target.innerHTML = `<span class="eyebrow">RECEIPT PREVIEW</span><dl>
     <div><dt>충전 잔액</dt><dd>${format(amount)}원</dd></div><div><dt>부가세 (10%)</dt><dd>${format(vat)}원</dd></div>
     <div class="total"><dt>입금 예정액</dt><dd>${format(amount + vat)}원</dd></div><div><dt>충전 후 잔액</dt><dd>${format(state.balances.credit + amount)}원</dd></div></dl>
-    <small>세금계산서는 승인 후 발행됩니다.</small>`;
+    <small>세금계산서가 필요하면 충전 신청 후 문의하기로 사업자 정보를 보내 주세요.</small>`;
 }
 
-function ledgerView() {
-  const rows = state.ledger.filter(item => item.wallet === 'credit');
-  const income = sum(rows.filter(item => item.amount > 0), 'amount');
-  const outgo = -sum(rows.filter(item => item.amount < 0), 'amount');
-  return `<div class="summary-strip">${[['현재 잔액', `${format(state.balances.credit)}원`], ['최근 입금·반환', `+${format(income)}원`], ['최근 예산 배정', `−${format(outgo)}원`], ['기록', `${format(rows.length)}건`]]
-    .map(([label, value]) => `<div><span>${label}</span><b>${value}</b></div>`).join('')}</div>
-    <section class="panel dash-block">${panelHead('잔액 내역', '충전, 예산 배정, 미집행 반환 기록과 거래 후 잔액')}${ledgerRows('credit', '원')}</section>`;
+function ledgerView(params) {
+  return asyncSlot('ledger', new URLSearchParams({ tab: 'ledger', wallet: 'credit', title: '잔액 내역', page: params.get('page') || '1' }));
 }
 
 /* ---------- 계정·파트너 ---------- */
@@ -896,37 +1058,65 @@ function accountForm(admin) {
     ${admin ? `<div class="parent-field" hidden>${select('소속 실행사', 'parent_id', [['', '선택 안 함'], ...operators.map(a => [a.id, a.name])])}</div>` : ''}
     ${field('표시 이름', 'name', 'text', 'required maxlength="60"')}
     ${field('로그인 아이디', 'username', 'text', 'required minlength="4" maxlength="32" autocomplete="off"')}
-    ${field('임시 비밀번호', 'password', 'password', 'required minlength="10" maxlength="128" autocomplete="new-password"')}
+    ${field('임시 비밀번호', 'password', 'password', 'required minlength="10" maxlength="128" autocomplete="new-password" placeholder="영문과 숫자를 함께 10자 이상"')}
+    <p class="form-hint">새 계정은 첫 로그인 후 비밀번호를 바꾸도록 안내됩니다.</p>
     ${btn(admin ? '계정 만들기' : '하위 대행사 등록', 'type="submit"')}
   </form>`;
+}
+
+const accountStatus = a => a.status === 'suspended' ? badge('suspended') : '';
+const manageButton = a => a.is_demo ? '<small>테스트 계정</small>' : btn('관리', `type="button" data-account="${a.id}"`, 'quiet small');
+
+function openAccount(id) {
+  const admin = state.user.role === 'admin';
+  const a = admin ? state.accounts.find(item => item.id === id) : { ...state.agencies.find(item => item.id === id), role: 'agency' };
+  if (!a?.id) return;
+  const hidden = action => `<input type="hidden" name="id" value="${a.id}"><input type="hidden" name="action" value="${action}">`;
+  const operators = admin ? state.accounts.filter(item => item.role === 'operator') : [];
+  modal(`${roleName[a.role]} · ${esc(a.username)}`, `${esc(a.name)} 계정 관리`, `
+    <form class="form" data-form="account/update">${hidden('reset_password')}
+      ${field('임시 비밀번호로 재설정', 'password', 'password', 'required minlength="10" maxlength="128" autocomplete="new-password" placeholder="영문과 숫자를 함께 10자 이상"')}
+      <p class="form-hint">재설정하면 기존 로그인이 모두 끊기고, 다음 로그인 때 비밀번호를 바꾸도록 안내합니다.</p>${btn('비밀번호 재설정', 'type="submit"', 'quiet small')}</form>
+    ${admin ? `<form class="form form-separated" data-form="account/update">${hidden('rename')}${field('표시 이름', 'name', 'text', `required maxlength="60" value="${esc(a.name)}"`)}${btn('이름 저장', 'type="submit"', 'quiet small')}</form>` : ''}
+    ${admin && a.role === 'agency' ? `<form class="form form-separated" data-form="account/update">${hidden('parent')}${select('소속 실행사', 'parent_id', [['', '소속 없음'], ...operators.map(o => [o.id, o.name])])}${btn('소속 저장', 'type="submit"', 'quiet small')}</form>` : ''}
+    <form class="form form-separated" data-form="account/update">${hidden(a.status === 'suspended' ? 'activate' : 'suspend')}
+      <p>${a.status === 'suspended' ? '정지를 해제하면 다시 로그인할 수 있습니다.' : '이용을 정지하면 즉시 로그아웃되고 로그인할 수 없습니다. 거래 기록은 그대로 보관됩니다.'}</p>
+      ${btn(a.status === 'suspended' ? '정지 해제' : '이용 정지', 'type="submit"', a.status === 'suspended' ? 'primary small' : 'danger small')}</form>`);
+  const parent = dialog.querySelector('select[name="parent_id"]');
+  if (parent) parent.value = a.parent_id ? String(a.parent_id) : '';
 }
 
 function partnerAdmin(params) {
   const operators = state.accounts.filter(a => a.role === 'operator');
   const filter = params.get('role') || '';
-  const list = state.accounts.filter(a => !filter || a.role === filter);
-  return `<div class="dash-grid g-1-1"><section class="panel">${panelHead('실행사 수익률 설정', '하위 대행사의 충전 승인액 기준. 개별 설정이 기본값보다 우선합니다.')}
-    <form class="form" data-form="rates">${field('전체 기본 수익률 (%)', 'rate', 'number', `required min="0" max="100" step="0.01" value="${state.defaultRate / 100}"`)}${btn('기본 수익률 저장', 'type="submit"')}</form>
+  const q = (params.get('q') || '').trim().toLowerCase();
+  const list = state.accounts.filter(a => (!filter || (filter === 'suspended' ? a.status === 'suspended' : a.role === filter)) && (!q || `${a.name} ${a.username}`.toLowerCase().includes(q)));
+  return `<div class="dash-grid g-1-1"><section class="panel">${panelHead('실행사 수익률 설정', `하위 대행사의 충전 승인액 기준 · 최대 ${state.maxRate / 100}%. 개별 설정이 기본값보다 우선합니다.`)}
+    <form class="form" data-form="rates">${field('전체 기본 수익률 (%)', 'rate', 'number', `required min="0" max="${state.maxRate / 100}" step="0.01" value="${state.defaultRate / 100}"`)}${btn('기본 수익률 저장', 'type="submit"')}</form>
     ${operators.length ? `<form class="form form-separated" data-form="rates">
       ${select('개별 실행사', 'operator_id', operators.map(a => [a.id, a.name + (a.rate === null ? ' · 기본값' : ` · ${a.rate / 100}%`)]))}
-      ${field('개별 수익률 (%)', 'rate', 'number', 'min="0" max="100" step="0.01" placeholder="비우면 기본값을 사용합니다"')}
+      ${field('개별 수익률 (%)', 'rate', 'number', `min="0" max="${state.maxRate / 100}" step="0.01" placeholder="비우면 기본값을 사용합니다"`)}
       ${btn('개별 설정 저장', 'type="submit"')}</form>` : ''}</section>
     <section class="panel">${panelHead('새 계정 등록')}${accountForm(true)}</section></div>
     <section class="panel dash-block">${panelHead('등록 계정', `참여자 ${format(state.roleCounts.participant || 0)}명 포함 전체 ${format(sum(Object.values(state.roleCounts), v => v))}개`)}
-      <div class="tabs">${[['', '전체'], ['advertiser', '광고주'], ['agency', '대행사'], ['operator', '실행사'], ['participant', '참여자'], ['admin', '관리자']].map(([key, label]) => `<a href="/manage?tab=partners${key ? '&amp;role=' + key : ''}" class="${key === filter ? 'on' : ''}">${label}</a>`).join('')}</div>
-      <div class="table-wrap"><table class="data-table"><thead><tr><th>이름</th><th>아이디</th><th>유형</th><th>소속</th><th class="num">광고 잔액</th><th>수익률</th></tr></thead><tbody>
-      ${list.map(a => `<tr><td><b>${esc(a.name)}</b></td><td><small>${esc(a.username)}</small></td><td><span class="status">${roleName[a.role]}</span></td><td>${esc(a.parent || '−')}</td>
-        <td class="num">${partners.includes(a.role) ? format(a.credit) + '원' : '−'}</td><td>${a.role === 'operator' ? (a.rate === null ? `기본 ${state.defaultRate / 100}%` : `${a.rate / 100}%`) : '−'}</td></tr>`).join('')}
-      </tbody></table></div>${state.demo ? '<p class="panel-note">데모 참여자 180명은 목록에서 생략하고 수만 표시합니다.</p>' : ''}</section>`;
+      <form class="filter-bar" data-filter="partners"><label class="search">${icon('search')}<input name="q" type="search" value="${esc(params.get('q') || '')}" placeholder="이름, 아이디 검색"></label>
+        <input type="hidden" name="role" value="${esc(filter)}">${btn('검색', 'type="submit"', 'primary small')}</form>
+      <div class="tabs">${[['', '전체'], ['advertiser', '광고주'], ['agency', '대행사'], ['operator', '실행사'], ['participant', '참여자'], ['admin', '관리자'], ['suspended', '이용 정지']].map(([key, label]) => `<a href="/manage?tab=partners${key ? '&amp;role=' + key : ''}" class="${key === filter ? 'on' : ''}">${label}</a>`).join('')}</div>
+      ${list.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>이름</th><th>아이디</th><th>유형</th><th>소속</th><th class="num">광고 잔액</th><th>수익률</th><th></th></tr></thead><tbody>
+      ${list.map(a => `<tr><td><b>${esc(a.name)}</b> ${accountStatus(a)}</td><td><small>${esc(a.username)}</small></td><td><span class="status">${roleName[a.role]}</span></td><td>${esc(a.parent || '−')}</td>
+        <td class="num">${partners.includes(a.role) ? format(a.credit) + '원' : '−'}</td><td>${a.role === 'operator' ? (a.rate === null ? `기본 ${state.defaultRate / 100}%` : `${a.rate / 100}%`) : '−'}</td>
+        <td class="row-actions">${a.role === 'admin' ? '' : manageButton(a)}</td></tr>`).join('')}
+      </tbody></table></div>` : empty('조건에 맞는 계정이 없어요.')}${state.demo ? '<p class="panel-note">데모 참여자 180명은 목록에서 생략하고 수만 표시합니다. 테스트 계정은 변경할 수 없습니다.</p>' : ''}</section>`;
 }
 const partners = ['advertiser', 'agency', 'operator'];
 
-function agencyTable(limit) {
+function agencyTable(limit, manage = false) {
   const list = state.agencies.slice(0, limit);
   if (!list.length) return empty('등록한 대행사가 없어요.');
-  return `<div class="table-wrap"><table class="data-table compact"><thead><tr><th>대행사</th><th class="num">충전 승인</th><th class="num">내 수익</th><th class="num">캠페인</th><th>최근 충전</th></tr></thead><tbody>
-    ${list.map(a => `<tr><td><b>${esc(a.name)}</b><small>${esc(a.username)}${a.pendingCharges ? ` · 충전 대기 ${a.pendingCharges}건` : ''}</small></td><td class="num">${format(a.charged)}원</td>
-      <td class="num plus">+${format(a.commission)}원</td><td class="num">${format(a.activeCampaigns)}<small>/${format(a.campaigns)}</small></td><td><small>${a.lastCharge ? day(a.lastCharge) : '−'}</small></td></tr>`).join('')}
+  return `<div class="table-wrap"><table class="data-table compact"><thead><tr><th>대행사</th><th class="num">충전 승인</th><th class="num">내 수익</th><th class="num">캠페인</th><th>최근 충전</th>${manage ? '<th></th>' : ''}</tr></thead><tbody>
+    ${list.map(a => `<tr><td><b>${esc(a.name)}</b> ${accountStatus(a)}<small>${esc(a.username)}${a.pendingCharges ? ` · 충전 대기 ${a.pendingCharges}건` : ''}</small></td><td class="num">${format(a.charged)}원</td>
+      <td class="num plus">+${format(a.commission)}원</td><td class="num">${format(a.activeCampaigns)}<small>/${format(a.campaigns)}</small></td><td><small>${a.lastCharge ? day(a.lastCharge) : '−'}</small></td>
+      ${manage ? `<td class="row-actions">${manageButton(a)}</td>` : ''}</tr>`).join('')}
   </tbody></table></div>`;
 }
 
@@ -934,56 +1124,107 @@ function agencies() {
   return `<div class="summary-strip">${[['소속 대행사', `${format(state.agencies.length)}곳`], ['대행사 충전 승인', `${format(sum(state.agencies, 'charged'))}원`],
       ['누적 수익', `${format(sum(state.agencies, 'commission'))}원`], ['진행 중 캠페인', `${format(sum(state.agencies, 'activeCampaigns'))}건`]]
     .map(([label, value]) => `<div><span>${label}</span><b>${value}</b></div>`).join('')}</div>
-    <div class="dash-grid g-2-1"><section class="panel">${panelHead('대행사별 실적')}${agencyTable(100)}</section>
-    <section class="panel">${panelHead('하위 대행사 등록', '생성한 대행사는 이 실행사에 연결됩니다.')}${accountForm(false)}</section></div>`;
+    <div class="dash-grid g-2-1"><section class="panel">${panelHead('대행사별 실적', '관리 버튼으로 비밀번호 재설정과 이용 정지를 할 수 있어요.')}${agencyTable(100, true)}</section>
+    <section class="panel">${panelHead('하위 대행사 등록', '생성한 대행사는 이 실행사에 연결됩니다.')}${accountForm(false)}</section></div>
+    <section class="panel dash-block">${panelHead('하위 대행사 캠페인', '캠페인명을 누르면 상세 리포트를 볼 수 있어요.')}${campaignTable(state.agencyCampaigns, { owner: true, limit: 50 })}</section>`;
 }
 
-function revenue() {
-  const records = state.ledger.filter(item => item.wallet === 'revenue');
+function payoutPanel(wallet) {
+  const unit = wallet === 'reward' ? 'P' : '원';
+  const min = state.payoutMinimum[wallet];
+  const available = state.balances[wallet];
+  return `<section class="panel payout-panel">${panelHead(wallet === 'reward' ? '포인트 출금 신청' : '수익 출금 신청', `${format(min)}${unit}부터 신청할 수 있어요. 운영팀 확인 후 지급되며, 반려되면 금액이 돌아옵니다.`)}
+    ${available >= min ? `<form class="form" data-form="payout">
+      ${field(`출금 금액 (${unit})`, 'amount', 'number', `required min="${min}" max="${Math.min(available, 10000000)}" step="1" value="${Math.min(available, 10000000)}"`)}
+      ${field('받을 계좌', 'destination', 'text', 'required minlength="5" maxlength="120" placeholder="예) 국민은행 123456-78-901234 홍길동" autocomplete="off"')}
+      ${btn('출금 신청', 'type="submit"')}</form>` : `<p class="notice">출금 가능 금액이 ${format(available)}${unit}이에요. ${format(min - available)}${unit} 더 모으면 신청할 수 있어요.</p>`}
+    ${state.demo ? '<p class="form-hint">테스트 환경에서는 실제로 지급되지 않습니다.</p>' : ''}
+    <h3 class="sub-title">출금 신청 내역</h3>${payoutTable(state.payouts || [], false)}</section>`;
+}
+
+function payoutTable(list, admin) {
+  if (!list.length) return empty('출금 신청 내역이 없어요.');
+  return `<div class="table-wrap"><table class="data-table compact"><thead><tr><th>번호</th><th>신청일</th>${admin ? '<th>신청 계정</th>' : ''}<th class="num">금액</th><th>받을 계좌</th><th>상태</th><th></th></tr></thead><tbody>
+    ${list.map(p => `<tr><td>#${p.id}</td><td><small>${dateTime(p.created)}</small></td>${admin ? `<td>${esc(p.owner)}<small>${roleName[p.ownerRole] || ''}</small></td>` : ''}
+      <td class="num">${format(p.amount)}${p.wallet === 'reward' ? 'P' : '원'}</td><td><small>${esc(p.destination)}</small></td><td>${badge(p.status)}${p.reason ? `<small>${esc(p.reason)}</small>` : ''}</td>
+      <td class="row-actions">${p.status !== 'pending' ? '' : admin ? decision('payout/decision', p.id, 'approve', '지급 완료') + decision('payout/decision', p.id, 'reject') : decision('payout/cancel', p.id, 'cancel', '신청 취소')}</td></tr>`).join('')}
+  </tbody></table></div>`;
+}
+
+function revenue(params) {
   const month = state.revenueTrend.filter(row => monthOf(row.day) === monthOf(state.date));
-  return `<section class="dash-hero"><div class="dash-hero-main"><span class="eyebrow">PARTNER REVENUE</span><h2>대행사 충전 누적 수익</h2>
-      <div class="hero-balance"><span>누적 수익</span><strong>${format(state.balances.revenue)}<small> 원</small></strong></div></div>
+  return `<section class="dash-hero"><div class="dash-hero-main"><span class="eyebrow">PARTNER REVENUE</span><h2>대행사 충전 수익</h2>
+      <div class="hero-balance"><span>출금 가능 수익</span><strong>${format(state.balances.revenue)}<small> 원</small></strong></div></div>
     <dl class="hero-side"><div><dt>이번 달 수익</dt><dd>${format(sum(month, 'total'))}원</dd></div><div><dt>적용 수익률</dt><dd>${state.rate / 100}%</dd></div>
-      <div><dt>정산 건수</dt><dd>${format(records.length)}건</dd></div><div><dt>소속 대행사</dt><dd>${format(state.agencies.length)}곳</dd></div></dl></section>
-    <section class="panel dash-block">${panelHead('일별 수익', '최근 31일')}${barChart(state.revenueTrend, [{ key: 'total', label: '수익', cls: 'c2' }], { unit: '원', label: '일별 수익', height: 210 })}</section>
-    <section class="panel dash-block">${panelHead('수익 원장')}${records.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>일시</th><th>대행사</th><th class="num">충전 승인액</th><th>적용률</th><th class="num">수익</th></tr></thead><tbody>
-      ${records.map(r => {
-        const charge = state.charges.find(c => c.id === Number(r.ref));
-        return `<tr><td><small>${dateTime(r.created)}</small></td><td>${esc(charge?.owner || '대행사')}<small>충전 #${esc(r.ref)}</small></td><td class="num">${format(charge?.amount || 0)}원</td><td>${(charge?.rate || 0) / 100}%</td><td class="num plus">+${format(r.amount)}원</td></tr>`;
-      }).join('')}</tbody></table></div>` : empty('정산된 대행사 충전 수익이 없어요.')}</section>`;
+      <div><dt>누적 수익</dt><dd>${format(sum(state.agencies, 'commission'))}원</dd></div><div><dt>소속 대행사</dt><dd>${format(state.agencies.length)}곳</dd></div></dl></section>
+    <div class="dash-grid g-1-1"><section class="panel">${panelHead('일별 수익', '최근 31일 · 충전 승인일 기준')}${barChart(state.revenueTrend, [{ key: 'total', label: '수익', cls: 'c2' }], { unit: '원', label: '일별 수익', height: 210 })}</section>
+    ${payoutPanel('revenue')}</div>
+    ${asyncSlot('ledger', new URLSearchParams({ tab: 'revenue', wallet: 'revenue', title: '수익 원장', page: params.get('page') || '1' }))}`;
+}
+
+function payoutsAdmin(params) {
+  const status = params.get('status') || 'all';
+  const list = state.payouts.filter(p => status === 'all' || p.status === status);
+  const pending = state.payouts.filter(p => p.status === 'pending');
+  return `<div class="summary-strip">${[['지급 대기', `${format(pending.length)}건`], ['대기 포인트', `${format(sum(pending.filter(p => p.wallet === 'reward'), 'amount'))}P`],
+      ['대기 수익 출금', `${format(sum(pending.filter(p => p.wallet === 'revenue'), 'amount'))}원`], ['표시 범위', '최근 100건']].map(([label, value]) => `<div><span>${label}</span><b>${value}</b></div>`).join('')}</div>
+    <section class="panel dash-block">${panelHead('출금 신청', '지급을 마친 뒤 ‘지급 완료’를 누르세요. 반려하면 금액이 신청자에게 돌아갑니다.')}
+    <div class="tabs">${[['all', '전체'], ['pending', '대기'], ['approved', '지급 완료'], ['rejected', '반려'], ['canceled', '취소']].map(([key, label]) => `<a href="/manage?tab=payouts&amp;status=${key}" class="${key === status ? 'on' : ''}">${label} <span class="count">${format(key === 'all' ? state.payouts.length : state.payouts.filter(p => p.status === key).length)}</span></a>`).join('')}</div>
+    ${payoutTable(list, true)}</section>`;
 }
 
 /* ---------- 관리자 운영 ---------- */
 function submissions(params) {
-  const status = params.get('status') || 'all';
-  const kind = params.get('kind') || '';
-  const list = state.submissions.filter(s => (status === 'all' || s.status === status) && (!kind || s.kind === kind));
-  const pending = list.filter(s => s.status === 'pending');
-  const link = (key, value) => {
-    const next = new URLSearchParams({ tab: 'submissions', status, kind, [key]: value });
-    for (const [k, v] of [...next]) if (!v) next.delete(k);
-    return '/manage?' + next.toString().replaceAll('&', '&amp;');
-  };
-  return `<div class="summary-strip">${[['검수 대기', `${format(state.adminCounts.pendingSubmissions)}건`], ['최근 승인', `${format(state.submissions.filter(s => s.status === 'approved').length)}건`],
-      ['최근 반려', `${format(state.submissions.filter(s => s.status === 'rejected').length)}건`], ['표시 범위', '최근 100건']].map(([label, value]) => `<div><span>${label}</span><b>${value}</b></div>`).join('')}</div>
-    <div class="toolbar"><div class="tabs">${[['all', '전체'], ['pending', '검수 대기'], ['approved', '승인'], ['rejected', '반려']].map(([key, label]) => `<a href="${link('status', key)}" class="${key === status ? 'on' : ''}">${label}</a>`).join('')}</div>
-      <div class="tabs">${[['', '전체 상품'], ...Object.entries(kinds)].map(([key, label]) => `<a href="${link('kind', key)}" class="${key === kind ? 'on' : ''}">${label}</a>`).join('')}</div>
-      ${pending.length > 1 ? btn(`대기 ${format(pending.length)}건 일괄 승인`, `type="button" data-bulk-approve="${pending.map(s => s.id).join(',')}"`, 'primary small') : ''}</div>
-    <div class="order-grid">${list.map(s => `<article class="panel order-card"><div class="row-top"><span class="eyebrow">제출 #${s.id} · ${dateTime(s.created)}</span>${badge(s.status)}</div>
-      <h3>${esc(s.title)}</h3><p>${esc(s.name)} · ${kinds[s.kind]} · 보상 ${format(s.reward)}P</p><blockquote>${esc(s.response)}</blockquote>
-      ${s.reason ? `<p class="order-note">${esc(s.reason)}</p>` : ''}
-      ${s.status === 'pending' ? `<div class="actions">${decision('mission/review', s.id, 'approve')}${decision('mission/review', s.id, 'reject')}</div>` : ''}</article>`).join('') || empty('조건에 맞는 제출이 없어요.')}</div>`;
+  return asyncSlot('submissions', params);
 }
 
+asyncViews.submissions = async params => {
+  const status = params.get('status') || '';
+  const kind = params.get('kind') || '';
+  const data = await api('/api/submissions?' + new URLSearchParams({ status: status === 'all' ? '' : status, kind, q: params.get('q') || '', page: params.get('page') || '1' }));
+  const link = changes => {
+    const next = new URLSearchParams({ tab: 'submissions', status, kind, q: params.get('q') || '', ...changes });
+    for (const [k, v] of [...next]) if (!v || v === 'all') next.delete(k);
+    return '/manage?' + next.toString().replaceAll('&', '&amp;');
+  };
+  const pending = data.items.filter(item => item.status === 'pending');
+  const pagePoints = sum(pending, 'reward');
+  return `<div class="summary-strip">${[['검수 대기', `${format(data.counts.pending)}건`], ['대기 보상 합계', `${format(data.pendingReward)}P`],
+      ['승인', `${format(data.counts.approved)}건`], ['반려', `${format(data.counts.rejected)}건`]].map(([label, value]) => `<div><span>${label}</span><b>${value}</b></div>`).join('')}</div>
+    <form class="filter-bar" data-filter="submissions"><label class="search">${icon('search')}<input name="q" type="search" value="${esc(params.get('q') || '')}" placeholder="캠페인명, 참여자, 답변 내용 검색"></label>
+      <input type="hidden" name="status" value="${esc(status)}"><input type="hidden" name="kind" value="${esc(kind)}">${btn('검색', 'type="submit"', 'primary small')}
+      ${params.get('q') ? `<a class="btn quiet small" href="${link({ q: '', page: '' })}">초기화</a>` : ''}</form>
+    <div class="toolbar"><div class="tabs">${[['all', '전체', data.counts.all], ['pending', '검수 대기', data.counts.pending], ['approved', '승인', data.counts.approved], ['rejected', '반려', data.counts.rejected]].map(([key, label, n]) => `<a href="${link({ status: key, page: '' })}" class="${key === (status || 'all') ? 'on' : ''}">${label} <span class="count">${format(n)}</span></a>`).join('')}</div>
+      <div class="tabs">${[['', '전체 상품'], ...Object.entries(kinds)].map(([key, label]) => `<a href="${link({ kind: key, page: '' })}" class="${key === kind ? 'on' : ''}">${label}</a>`).join('')}</div>
+      ${pending.length > 1 ? btn(`이 페이지 대기 ${format(pending.length)}건 일괄 승인`, `type="button" data-bulk-approve="${pending.map(item => item.id).join(',')}" data-points="${pagePoints}"`, 'primary small') : ''}</div>
+    <div class="order-grid">${data.items.map(item => `<article class="panel order-card"><div class="row-top"><span class="eyebrow">제출 #${item.id} · ${dateTime(item.created)}</span>${badge(item.status)}</div>
+      <h3>${esc(item.title)}</h3><p>${esc(item.name)} · ${kinds[item.kind]} · 보상 ${format(item.reward)}P</p><blockquote>${esc(item.response)}</blockquote>
+      ${item.reason ? `<p class="order-note">${esc(item.reason)}</p>` : ''}
+      ${item.status === 'pending' ? `<div class="actions">${decision('mission/review', item.id, 'approve')}${decision('mission/review', item.id, 'reject')}</div>` : ''}</article>`).join('') || empty('조건에 맞는 제출이 없어요.')}</div>
+    ${pager(data.page, data.pages, link({ page: '' }))}`;
+};
+
+const audiences = { all: '전체', business: '광고 계정', participant: '참여자' };
+const noticeForm = (path, item = {}) => `<form class="form" data-form="${path}">${item.id ? `<input type="hidden" name="id" value="${item.id}">` : ''}
+  ${field('제목', 'title', 'text', `required minlength="2" maxlength="80" value="${esc(item.title || '')}"`)}
+  ${textarea('내용', 'body', 'required minlength="2" maxlength="1000" rows="5"')}
+  ${select('공지 대상', 'audience', Object.entries(audiences))}
+  <label class="check"><input type="checkbox" name="pinned" value="1"${item.pinned ? ' checked' : ''}> 상단 고정</label>${btn(item.id ? '수정 내용 저장' : '공지 등록', 'type="submit"')}</form>`;
+
 function notices() {
-  const audiences = { all: '전체', business: '광고 계정', participant: '참여자' };
-  return `<div class="dash-grid g-1-1"><section class="panel">${panelHead('공지 등록', '대상별로 대시보드에 표시됩니다.')}
-    <form class="form" data-form="notice">${field('제목', 'title', 'text', 'required minlength="2" maxlength="80"')}
-      ${textarea('내용', 'body', 'required minlength="2" maxlength="1000" rows="5"')}
-      ${select('공지 대상', 'audience', Object.entries(audiences))}
-      <label class="check"><input type="checkbox" name="pinned" value="1"> 상단 고정</label>${btn('공지 등록', 'type="submit"')}</form></section>
-    <section class="panel">${panelHead('등록된 공지', `${format(state.notices.length)}건`)}${state.notices.map(item => `<article class="notice-row"><div class="row-top"><span class="eyebrow">${audiences[item.audience]} · ${day(item.created)}</span>${item.pinned ? '<span class="pin">고정</span>' : ''}</div>
-      <h3>${esc(item.title)}</h3><p>${esc(item.body)}</p><form class="actions" data-form="notice/delete"><input type="hidden" name="id" value="${item.id}">${btn('삭제', 'type="submit"', 'quiet small')}</form></article>`).join('') || empty('등록된 공지가 없어요.')}</section></div>`;
+  return `<div class="dash-grid g-1-1"><section class="panel">${panelHead('공지 등록', '대상별로 대시보드와 상단 종 아이콘에 표시됩니다.')}${noticeForm('notice')}</section>
+    <section class="panel">${panelHead('등록된 공지', `${format(state.notices.length)}건`)}${state.notices.map(item => `<article class="notice-row"><div class="row-top"><span class="eyebrow">${audiences[item.audience]} · ${day(item.created)}${item.updated ? ' · 수정됨' : ''}</span>${item.pinned ? '<span class="pin">고정</span>' : ''}</div>
+      <h3>${esc(item.title)}</h3><p>${esc(item.body)}</p><div class="actions">${btn('수정', `type="button" data-edit-notice="${item.id}"`, 'quiet small')}
+      <form data-form="notice/delete"><input type="hidden" name="id" value="${item.id}">${btn('삭제', 'type="submit"', 'quiet small')}</form></div></article>`).join('') || empty('등록된 공지가 없어요.')}</section></div>`;
+}
+
+function openEditNotice(id) {
+  const item = state.notices.find(notice => notice.id === id);
+  if (!item) return;
+  modal('NOTICE', '공지 수정', noticeForm('notice/update', item));
+  const form = dialog.querySelector('form[data-form]');
+  form.elements.body.value = item.body;
+  form.elements.audience.value = item.audience;
 }
 
 function design() {
@@ -992,14 +1233,36 @@ function design() {
     <img src="/assets/wallpaper-${key}.webp" alt="" loading="lazy"><span>${name}</span>${state.background === key ? icon('check') : ''}</button>`).join('')}</div></section>`;
 }
 
-function inquiries() {
+function inquiries(params) {
+  const filter = params.get('status') || 'all';
+  const list = state.inquiries.filter(item => filter === 'all' || (filter === 'open' ? !item.reply : Boolean(item.reply)));
   return `<section><div class="section-head"><h2>접수된 문의</h2><span class="status pending">${format(state.adminCounts.unreadInquiries)}건 미확인</span></div>
-    <div class="order-grid">${state.inquiries.map(item => `<article class="panel order-card"><div class="row-top"><span class="eyebrow">문의 #${item.id} · ${day(item.created)}</span>
-      <span class="status ${item.reviewed ? 'approved' : 'pending'}">${item.reviewed ? '확인 완료' : '미확인'}</span></div>
+    <div class="tabs">${[['all', '전체'], ['open', '답변 전'], ['answered', '답변 완료']].map(([key, label]) => `<a href="/manage?tab=inquiries&amp;status=${key}" class="${key === filter ? 'on' : ''}">${label}</a>`).join('')}</div>
+    <div class="order-grid">${list.map(item => `<article class="panel order-card"><div class="row-top"><span class="eyebrow">문의 #${item.id} · ${day(item.created)}</span>
+      <span class="status ${item.reply ? 'approved' : item.reviewed ? 'paused' : 'pending'}">${item.reply ? '답변 완료' : item.reviewed ? '확인' : '미확인'}</span></div>
       <h3>${esc(item.subject)}</h3><p>${esc(item.sender || '비회원')}${item.email ? ' · ' + esc(item.email) : ''}</p>
       <blockquote>${esc(item.message)}</blockquote>
-      ${item.reviewed ? '' : `<form class="actions" data-form="inquiry/review"><input type="hidden" name="id" value="${item.id}">${btn('확인 완료로 표시', 'type="submit"', 'quiet small')}</form>`}</article>`).join('') || empty('접수된 문의가 없어요.')}</div></section>`;
+      ${item.reply ? `<div class="reply"><span class="eyebrow">답변 · ${dateTime(item.replied)}</span><p>${esc(item.reply)}</p></div>` : ''}
+      <form class="form" data-form="inquiry/reply"><input type="hidden" name="id" value="${item.id}">${textarea(item.reply ? '답변 고치기' : '답변 작성', 'reply', 'required minlength="2" maxlength="2000" rows="3"')}
+        <p class="form-hint">${item.sender ? '회원은 프로필의 ‘내 문의’에서 답변을 봅니다.' : item.email ? '비회원 문의입니다. 답변을 저장한 뒤 위 이메일로도 보내 주세요.' : '연락처가 없는 문의입니다.'}</p>
+        <div class="actions">${btn('답변 저장', 'type="submit"', 'primary small')}</div></form>
+      ${item.reviewed ? '' : `<form class="actions" data-form="inquiry/review"><input type="hidden" name="id" value="${item.id}">${btn('답변 없이 확인 처리', 'type="submit"', 'quiet small')}</form>`}</article>`).join('') || empty('접수된 문의가 없어요.')}</div></section>`;
 }
+
+function auditView(params) {
+  return asyncSlot('audit', params);
+}
+
+asyncViews.audit = async params => {
+  const data = await api('/api/audit?' + new URLSearchParams({ q: params.get('q') || '', page: params.get('page') || '1' }));
+  const base = `/manage?tab=audit${params.get('q') ? '&amp;q=' + encodeURIComponent(params.get('q')) : ''}`;
+  return `<form class="filter-bar" data-filter="audit"><label class="search">${icon('search')}<input name="q" type="search" value="${esc(params.get('q') || '')}" placeholder="작업명, 처리자, 번호, 내용 검색"></label>${btn('검색', 'type="submit"', 'primary small')}
+      ${params.get('q') ? '<a class="btn quiet small" href="/manage?tab=audit">초기화</a>' : ''}</form>
+    <section class="panel dash-block">${panelHead('운영 기록', `${format(data.total)}건`)}
+    ${data.items.length ? `<div class="table-wrap"><table class="data-table compact"><thead><tr><th>일시</th><th>작업</th><th>대상</th><th>처리자</th><th>내용</th></tr></thead><tbody>
+      ${data.items.map(item => `<tr><td><small>${dateTime(item.created)}</small></td><td><b>${esc(item.action)}</b></td><td>#${esc(item.subject)}</td><td>${esc(item.name || '시스템')}</td><td><small>${esc(statuses[item.detail] || roleName[item.detail] || item.detail || '−')}</small></td></tr>`).join('')}
+    </tbody></table></div>` : empty('기록이 없어요.')}${pager(data.page, data.pages, base)}</section>`;
+};
 
 function participantHistory(params) {
   const status = params.get('status') || 'all';
@@ -1008,11 +1271,12 @@ function participantHistory(params) {
     ${items.length ? participationList(items) : empty('해당 상태의 참여 내역이 없어요.')}</section>`;
 }
 
-function participantRewards() {
+function participantRewards(params) {
   return `<section class="dash-hero participant"><div class="dash-hero-main"><span class="eyebrow">MY REWARDS</span><h2>보유 포인트</h2>
       <div class="hero-balance"><strong>${format(state.balances.reward)}<small> P</small></strong></div><div class="hero-actions"><a class="btn lime" href="/missions">미션 둘러보기 ${icon('arrow')}</a></div></div>
     <dl class="hero-side"><div><dt>최근 14일 적립</dt><dd>${format(sum(state.trend, 'total'))}P</dd></div><div><dt>승인 미션</dt><dd>${format(state.submissions.filter(s => s.status === 'approved').length)}건</dd></div></dl></section>
-    <section class="panel dash-block">${panelHead('포인트 적립 기록', '거래 후 잔액 포함')}${ledgerRows('reward', 'P')}</section>`;
+    ${payoutPanel('reward')}
+    ${asyncSlot('ledger', new URLSearchParams({ tab: 'rewards', wallet: 'reward', title: '포인트 적립·사용 기록', page: params.get('page') || '1' }))}`;
 }
 
 function profileImageEditor(user) {
@@ -1066,11 +1330,25 @@ async function saveAvatar(file, userId) {
 }
 
 function consoleProfile(user) {
-  return `<section class="panel console-profile"><h2>${esc(user.name)}</h2>${profileImageEditor(user)}
+  const inquiries = state.myInquiries || [];
+  return `<div class="dash-grid g-1-1"><section class="panel console-profile"><h2>${esc(user.name)}</h2>${profileImageEditor(user)}
     <dl><div><dt>계정 유형</dt><dd>${roleName[user.role]}</dd></div><div><dt>로그인 아이디</dt><dd>${esc(user.username)}</dd></div>
       ${user.role === 'participant' ? `<div><dt>보유 포인트</dt><dd>${format(state.balances.reward)}P</dd></div>` : user.role !== 'admin' ? `<div><dt>광고 잔액</dt><dd>${format(state.balances.credit)}원</dd></div>` : ''}</dl>
     <div class="actions">${btn('로그아웃', 'type="button" data-logout', 'quiet')}
-      ${state.demo ? '<a class="btn primary" href="/login">테스트 계정 전환</a>' : ''}</div></section>`;
+      ${state.demo ? '<a class="btn primary" href="/login">테스트 계정 전환</a>' : ''}</div></section>
+    <section class="panel">${panelHead('계정 설정')}
+      ${user.is_demo ? '<p class="notice">테스트 계정은 이름과 비밀번호를 바꿀 수 없습니다.</p>' : `
+      <form class="form" data-form="profile">${field('표시 이름', 'name', 'text', `required maxlength="60" value="${esc(user.name)}" autocomplete="name"`)}${btn('이름 저장', 'type="submit"', 'quiet small')}</form>
+      <form class="form form-separated" data-form="password" id="password-form">
+        <input type="text" name="username" value="${esc(user.username)}" autocomplete="username" hidden>
+        ${field('현재 비밀번호', 'current', 'password', 'required maxlength="128" autocomplete="current-password"')}
+        ${field('새 비밀번호', 'password', 'password', 'required minlength="10" maxlength="128" autocomplete="new-password" placeholder="영문과 숫자를 함께 10자 이상"')}
+        ${field('새 비밀번호 확인', 'confirm', 'password', 'required minlength="10" maxlength="128" autocomplete="new-password"')}
+        <p class="form-hint">변경하면 다른 기기의 로그인은 모두 끊어집니다.</p>${btn('비밀번호 변경', 'type="submit"')}</form>`}
+    </section></div>
+    ${user.role === 'admin' ? '' : `<section class="panel dash-block">${panelHead('내 문의', `${format(inquiries.length)}건`, btn('새 문의', 'type="button" data-support', 'quiet small'))}
+      ${inquiries.map(item => `<article class="notice-row"><div class="row-top"><span class="eyebrow">문의 #${item.id} · ${day(item.created)}</span><span class="status ${item.reply ? 'approved' : 'pending'}">${item.reply ? '답변 완료' : '답변 대기'}</span></div>
+        <h3>${esc(item.subject)}</h3><p>${esc(item.message)}</p>${item.reply ? `<div class="reply"><span class="eyebrow">애즈폼 운영팀 · ${dateTime(item.replied)}</span><p>${esc(item.reply)}</p></div>` : ''}</article>`).join('') || empty('남긴 문의가 없어요.')}</section>`}`;
 }
 
 function manage(params) {
@@ -1082,11 +1360,18 @@ function manage(params) {
     [...consoleNav.business, ...(user.role === 'operator' ? consoleNav.operator : [])];
   const profile = ['profile', '프로필', 'user'];
   const pages = [...groups.flatMap(([, items]) => items), profile];
-  const [tab, title] = pages.find(([key]) => key === params.get('tab')) || pages[0];
+  const requested = params.get('tab');
+  const [tab, title] = pages.find(([key]) => key === requested) || pages[0];
+  const missing = requested && requested !== tab;
   const badges = admin ? { orders: state.campaigns.filter(c => c.status === 'pending').length, submissions: state.adminCounts.pendingSubmissions,
-    charges: state.charges.filter(c => c.status === 'pending').length, inquiries: state.adminCounts.unreadInquiries } : {};
-  const views = { overview: () => overview(user), new: () => orderForm(params), orders: () => orders(params, admin), charges: () => charges(params, admin), ledger: ledgerView,
-    partners: () => partnerAdmin(params), notices, design, inquiries, agencies, revenue, submissions: () => submissions(params), history: () => participantHistory(params), rewards: participantRewards, profile: () => consoleProfile(user) };
+    charges: state.charges.filter(c => c.status === 'pending').length, inquiries: state.adminCounts.unreadInquiries, payouts: state.adminCounts.pendingPayouts } : {};
+  const views = { overview: () => overview(user), new: () => orderForm(params), orders: () => orders(params, admin), charges: () => charges(params, admin), ledger: () => ledgerView(params),
+    partners: () => partnerAdmin(params), notices, design, inquiries: () => inquiries(params), agencies, revenue: () => revenue(params), submissions: () => submissions(params),
+    history: () => participantHistory(params), rewards: () => participantRewards(params), profile: () => consoleProfile(user), payouts: () => payoutsAdmin(params), audit: () => auditView(params) };
+  const banners = [
+    missing ? `<p class="notice">${requested === 'new' ? '광고 주문은 광고주·대행사·실행사 계정에서 할 수 있어요.' : '이 계정에서 사용할 수 없는 메뉴라 대시보드를 보여 드려요.'}</p>` : '',
+    user.must_change && tab !== 'profile' ? `<p class="notice warn">${icon('lock')} 운영팀이 만든 임시 비밀번호를 쓰고 있어요. <a href="/manage?tab=profile#password-form">비밀번호 변경하기</a></p>` : ''
+  ].join('');
   const menuLink = ([key, label, glyph]) => `<a href="/manage?tab=${key}"${key === tab ? ' aria-current="page"' : ''}>${key === 'profile' ? profileAvatar(user, 'avatar-small') : icon(glyph)}<span>${label}</span>${badges[key] ? `<em class="nav-badge">${format(badges[key])}</em>` : ''}</a>`;
   const balanceLine = participant ? `${format(state.balances.reward)} P` : admin ? '' : `${format(state.balances.credit)}원`;
   return `<div class="console-frame">
@@ -1105,7 +1390,7 @@ function manage(params) {
     <div class="console-workspace"><div class="console-content">
       <header class="console-head"><div><span class="eyebrow">${admin ? 'ADSFORM STUDIO' : participant ? 'ADSFORM REWARDS' : 'ADSFORM BUSINESS'}</span><h1>${title}</h1></div>
         <div class="console-head-side">${tab !== 'new' && !admin && !participant ? `<a class="btn primary small" href="/manage?tab=new">${icon('target')} 새 주문</a>` : ''}<time datetime="${state.date}">${day(state.date)}</time></div></header>
-      <div class="console-view">${views[tab]()}</div>
+      <div class="console-view">${banners}${views[tab]()}</div>
     </div></div>
   </div>`;
 }
@@ -1115,8 +1400,13 @@ function render() {
   document.body.className = `theme-${state.background}${location.pathname === '/manage' && state.user ? ' console-mode' : ''}`;
   nav();
   const params = new URLSearchParams(location.search);
-  const pages = { '/': home, '/missions': missions, '/login': login, '/account': state.user ? account : login, '/manage': manage };
+  if (location.pathname === '/account') history.replaceState({}, '', state.user ? '/manage?tab=profile' : '/login');
+  if (['/login', '/signup'].includes(location.pathname) && state.user && !state.demo) history.replaceState({}, '', '/manage');
+  document.body.classList.toggle('console-mode', location.pathname === '/manage' && Boolean(state.user));
+  const pages = { '/': home, '/missions': missions, '/login': login, '/signup': signup, '/terms': terms, '/privacy': privacy, '/manage': manage };
   $('#main').innerHTML = (pages[location.pathname] || home)(params);
+  labelTables($('#main'));
+  hydrate();
   scheduleBannerRotation();
   const campaign = $('[data-form="campaign"]');
   if (campaign) {
@@ -1133,6 +1423,7 @@ function render() {
 
 function afterLogin(user) {
   const next = new URLSearchParams(location.search).get('next');
+  if (user.must_change) return '/manage?tab=profile';
   if (next === 'missions' && user.role === 'participant') return '/missions';
   if (next === 'rewards' && user.role === 'participant') return '/manage?tab=rewards';
   if (next === 'order' && !['participant', 'admin'].includes(user.role)) return '/manage?tab=new';
@@ -1176,8 +1467,12 @@ document.addEventListener('click', event => {
   const link = event.target.closest('a[href^="/"]');
   if (link && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) {
     event.preventDefault();
+    if (link.target === '_blank') return window.open(link.href, '_blank', 'noopener');
     let href = link.getAttribute('href');
     if (href.startsWith('/manage') && !state?.user) href = href.includes('tab=new') ? '/login?next=order' : '/login';
+    if (href.includes('tab=new') && ['participant', 'admin'].includes(state?.user?.role)) {
+      return showToast('광고 주문은 광고주·대행사·실행사 계정에서 할 수 있어요.');
+    }
     go(href);
     return;
   }
@@ -1211,6 +1506,10 @@ document.addEventListener('click', event => {
     openMission(Number(d.mission));
   });
   if ('order' in d) openOrder(Number(d.order));
+  if ('editOrder' in d) openEditOrder(Number(d.editOrder));
+  if ('editNotice' in d) openEditNotice(Number(d.editNotice));
+  if ('account' in d) openAccount(Number(d.account));
+  if ('notices' in d) openNotices();
   if ('amount' in d) {
     const input = button.form.elements.amount;
     input.value = Number(d.amount) ? Math.min(10000000, Number(input.value || 0) + Number(d.amount)) : 0;
@@ -1222,15 +1521,11 @@ document.addEventListener('click', event => {
     form.elements.end.value = new Date(Date.parse(start) + (Number(d.span) - 1) * 86_400_000).toISOString().slice(0, 10);
     updateOrderForm(form);
   }
-  if ('bulkApprove' in d) act(button, async () => {
-    const ids = d.bulkApprove.split(',').map(Number);
-    let done = 0;
-    for (const id of ids) {
-      try { await api('/api/mission/review', { id, action: 'approve' }); done++; } catch { /* 이미 처리된 제출은 건너뜁니다. */ }
-    }
-    await reload();
-    showToast(`${format(done)}건을 승인했습니다.`);
-  });
+  if ('bulkApprove' in d) {
+    const count = d.bulkApprove.split(',').length;
+    modal('ADSFORM STUDIO', '일괄 승인 확인', `<p>검수 대기 <b>${format(count)}건</b>을 승인하고 참여자에게 모두 <b>${format(Number(d.points))}P</b>를 지급합니다. 승인 후에는 되돌릴 수 없어요.</p>
+      <form class="form" data-form="mission/review/bulk"><input type="hidden" name="ids" value="${esc(d.bulkApprove)}">${btn(`${format(count)}건 승인`, 'type="submit"')}</form>`);
+  }
   if ('guide' in d) modal('HELP CENTER', '이용 안내', faq.map(([q, a]) => `<details><summary>${q}</summary><p>${a}</p></details>`).join(''));
   if ('support' in d) openSupport();
   if ('demo' in d) act(button, async () => {
@@ -1252,11 +1547,23 @@ document.addEventListener('click', event => {
     showToast('PC 화면 배경을 적용했습니다.');
   });
   if ('decision' in d) {
-    const reason = d.action === 'reject' && d.decision !== 'charge/decision';
-    const explanation = { pause: '참여자에게 열려 있던 자리는 해제됩니다. 이미 제출한 응답은 검수할 수 있습니다.', close: '미제출 예약을 해제하고 승인 완료 건 기준으로 미집행 예산을 반환합니다.' };
-    modal('ADSFORM STUDIO', actions[d.action] + ' 확인', `<p>${explanation[d.action] || `선택한 항목을 ${actions[d.action]} 처리합니다.`}</p>
-      <form data-form="${d.decision}" class="form"><input type="hidden" name="id" value="${d.id}"><input type="hidden" name="action" value="${d.action}">
-      ${reason ? textarea('반려 사유', 'reason', 'required maxlength="200" rows="3"') : ''}${btn(actions[d.action] + ' 처리', 'type="submit"')}</form>`);
+    const reason = d.action === 'reject';
+    const label = d.label || actions[d.action];
+    const explanation = {
+      'campaign/decision:pause': '참여자에게 열려 있던 자리는 해제됩니다. 이미 제출한 응답은 검수할 수 있습니다.',
+      'campaign/decision:close': '미제출 예약을 해제하고 승인 완료 건 기준으로 미집행 예산을 반환합니다. 검수 중인 응답이 있으면 종료할 수 없어요.',
+      'campaign/decision:cancel': '심사 전 주문을 취소하고 배정된 예산을 모두 잔액으로 돌려드립니다.',
+      'campaign/decision:resume': '캠페인을 다시 열어 참여를 받습니다.',
+      'charge/decision:reject': '반려 사유는 신청자의 충전 내역에 표시됩니다.',
+      'charge/cancel:cancel': '승인 전 충전 신청을 취소합니다.',
+      'payout/decision:approve': '계좌로 지급을 마친 경우에만 지급 완료로 처리하세요.',
+      'payout/decision:reject': '반려하면 신청 금액이 신청자에게 돌아갑니다. 사유는 신청자에게 표시됩니다.',
+      'payout/cancel:cancel': '출금 신청을 취소하고 금액을 돌려받습니다.',
+      'mission/review:reject': '반려 사유는 참여자의 참여 내역에 표시됩니다.'
+    }[`${d.decision}:${d.action}`];
+    modal('ADSFORM', label + ' 확인', `<p>${explanation || `선택한 항목을 ${label} 처리합니다.`}</p>
+      <form data-form="${esc(d.decision)}" class="form"><input type="hidden" name="id" value="${esc(d.id)}"><input type="hidden" name="action" value="${esc(d.action)}">
+      ${reason ? textarea('반려 사유', 'reason', 'required maxlength="200" rows="3"') : ''}${btn(label + ' 처리', 'type="submit"', d.action === 'reject' || d.action === 'cancel' ? 'danger' : 'primary')}</form>`);
   }
 });
 
@@ -1267,6 +1574,7 @@ document.addEventListener('keydown', event => {
 document.addEventListener('input', event => {
   const form = event.target.form;
   if (form?.dataset.form === 'campaign') updateOrderForm(form);
+  if (form?.dataset.form === 'campaign/edit') syncAnswerOptions(form);
   if (form?.dataset.form === 'charge') updateChargeForm(form);
   if (form?.dataset.form === 'account' && event.target.name === 'role') {
     const parent = form.querySelector('.parent-field');
@@ -1297,10 +1605,12 @@ document.addEventListener('submit', event => {
   const button = event.submitter || form.querySelector('button[type="submit"]');
   act(button, async () => {
     const data = Object.fromEntries(new FormData(form));
-    if (['campaign', 'charge', 'inquiry'].includes(path)) {
+    if (['campaign', 'charge', 'inquiry', 'payout'].includes(path)) {
       form.dataset.key ||= crypto.randomUUID();
       data.key = form.dataset.key;
     }
+    if (path === 'password' && data.password !== data.confirm) throw new Error('새 비밀번호 확인이 일치하지 않습니다.');
+    if (path === 'mission/review/bulk') data.ids = data.ids.split(',').map(Number);
     const result = await api('/api/' + path, data);
     if (path === 'mission/reserve') {
       await reload();
@@ -1308,15 +1618,26 @@ document.addEventListener('submit', event => {
       return;
     }
     if (dialog.open) dialog.close();
-    if (path === 'login') {
-      const next = afterLogin(result.user);
+    if (path === 'login' || path === 'signup') {
+      const next = path === 'signup' ? (result.user.role === 'participant' ? '/missions' : '/manage?tab=charges') : afterLogin(result.user);
       state = await api('/api/state');
       go(next);
     } else if (path !== 'inquiry') {
       await reload();
       if (path === 'campaign') go('/manage?tab=orders');
     }
-    const messages = { campaign: '광고 주문을 접수했습니다.', charge: '충전을 신청했습니다.', account: '계정을 등록했습니다.', rates: '수익률 설정을 저장했습니다.', login: '로그인했습니다.', inquiry: `문의 #${result.id}을 접수했습니다.`, 'inquiry/review': '문의 확인 상태를 저장했습니다.', 'campaign/memo': '메모를 저장했습니다.', notice: '공지를 등록했습니다.', 'notice/delete': '공지를 삭제했습니다.' };
+    if (path === 'inquiry' && state.user) await reload();
+    const messages = { campaign: '광고 주문을 접수했습니다.', charge: '충전을 신청했습니다.', account: '계정을 등록했습니다.', rates: '수익률 설정을 저장했습니다.', login: '로그인했습니다.',
+      signup: '가입을 환영해요!', inquiry: `문의 #${result.id}을 접수했습니다.`, 'inquiry/review': '문의 확인 상태를 저장했습니다.', 'inquiry/reply': '답변을 저장했습니다.',
+      'campaign/memo': '메모를 저장했습니다.', 'campaign/edit': '주문 내용을 수정했습니다.', notice: '공지를 등록했습니다.', 'notice/update': '공지를 수정했습니다.', 'notice/delete': '공지를 삭제했습니다.',
+      password: '비밀번호를 변경했습니다.', profile: '이름을 저장했습니다.', 'account/update': '계정 정보를 저장했습니다.', payout: '출금을 신청했습니다.',
+      'payout/cancel': '출금 신청을 취소했습니다.', 'payout/decision': '출금 신청을 처리했습니다.', 'charge/cancel': '충전 신청을 취소했습니다.', 'charge/decision': '충전 요청을 처리했습니다.',
+      'campaign/decision': '캠페인 상태를 변경했습니다.', 'mission/review': '검수 결과를 저장했습니다.', 'mission/review/bulk': `${format(result.done || 0)}건을 승인했습니다.` };
+    const actionMessages = { 'campaign/decision:cancel': '주문을 취소했습니다. 예산은 잔액으로 돌아갔어요.', 'campaign/decision:close': '캠페인을 종료하고 정산했습니다.',
+      'campaign/decision:pause': '캠페인을 일시중지했습니다.', 'campaign/decision:resume': '캠페인을 다시 시작했습니다.', 'account/update:suspend': '이용을 정지했습니다.',
+      'account/update:activate': '정지를 해제했습니다.', 'account/update:reset_password': '임시 비밀번호로 재설정했습니다.', 'payout/decision:approve': '지급 완료로 처리했습니다.',
+      'payout/decision:reject': '출금 신청을 반려했습니다.', 'charge/decision:approve': '충전을 승인했습니다.', 'charge/decision:reject': '충전을 반려했습니다.' };
+    if (actionMessages[`${path}:${data.action}`]) return showToast(actionMessages[`${path}:${data.action}`]);
     showToast(path === 'mission' ? ({ pending: '답변을 제출했습니다. 검수 후 결과를 확인하세요.', approved: '정답입니다. 포인트를 적립했어요!', rejected: '정답이 일치하지 않아 적립되지 않았습니다.' }[result.status]) : messages[path] || '처리했습니다.');
   });
 });

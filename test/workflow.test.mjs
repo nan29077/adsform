@@ -14,7 +14,7 @@ test('로컬 역할 권한, 대행사 수익, 광고 집행과 보상', { timeou
   const port = process.env.ADSFORM_TEST_PORT || '4318';
   const origin = `http://127.0.0.1:${port}`;
   const server = spawn(process.execPath, [fileURLToPath(new URL('../server.mjs', import.meta.url))], {
-    env: { ...process.env, ADSFORM_DB: db, ADSFORM_PORT: port, ADSFORM_DEMO: '1', ADSFORM_PUBLIC_ORIGIN: 'https://adsform.example' },
+    env: { ...process.env, ADSFORM_DB: db, ADSFORM_PORT: port, ADSFORM_DEMO: '1', ADSFORM_MIN_DWELL: '0', ADSFORM_PUBLIC_ORIGIN: 'https://adsform.example' },
     stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true
   });
   let log = '';

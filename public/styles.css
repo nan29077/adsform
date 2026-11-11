@@ -1,3 +1,10 @@
+@font-face {
+  font-family: "Pretendard";
+  src: url("/assets/fonts/PretendardSubset.woff2") format("woff2-variations"), url("/assets/fonts/PretendardSubset.woff2") format("woff2");
+  font-weight: 45 920;
+  font-style: normal;
+  font-display: swap;
+}
 :root {
   font-family: "Pretendard", "Noto Sans KR", "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif;
   color: #192824;
@@ -459,7 +466,7 @@ dialog::backdrop { background: #142820a8; }
 .hero-side div { padding: 13px 14px; border-radius: 14px; background: #ffffff10; border: 1px solid #ffffff1f; }
 .hero-side dt { color: #c5d9cc; font-size: 11px; font-weight: 750; }
 .hero-side dd { margin: 5px 0 0; font: 850 clamp(15px,1.5vw,19px)/1.2 system-ui,sans-serif; overflow-wrap: anywhere; }
-.queue { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 7px; margin-top: 16px; }
+.queue { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 7px; margin-top: 16px; }
 .queue a { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 2px 7px; padding: 10px; border-radius: 13px; background: #ffffff0f; border: 1px solid #ffffff1f; font-size: 11px; font-weight: 750; color: #d3e4d9; }
 .queue a svg { grid-row: span 2; width: 18px; height: 18px; color: #c7dccd; }
 .queue a b { font: 850 20px/1 system-ui,sans-serif; color: #fff; }
@@ -733,3 +740,66 @@ dialog.wide { max-width: min(calc(100% - 26px),880px); }
   .data-table { font-size: 12px; }
 }
 .console-view > .panel.charge-panel { max-width: none; }
+
+/* ---------- 2026-11-11 점검 반영 ---------- */
+.notice-bell { position: relative; }
+.unread-dot { position: absolute; top: 6px; right: 7px; width: 8px; height: 8px; border-radius: 50%; background: #d4553f; box-shadow: 0 0 0 2px #fff; }
+.link-button { border: 0; background: none; padding: 0; color: var(--green); font-weight: 800; text-decoration: underline; }
+.form-hint a, .notice a, .check a { color: var(--green); font-weight: 800; text-decoration: underline; }
+.form-hint.center { text-align: center; }
+.btn.danger { background: #fbe9e4; color: #963b2e; border-color: #f2cdc4; }
+.btn.danger:hover { background: #f7dad2; }
+.notice.warn { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; background: #fff4d6; color: #6a5420; margin: 0 0 16px; }
+.notice.warn svg { width: 16px; height: 16px; }
+.console-view > .notice:first-child { margin-top: 0; margin-bottom: 16px; }
+.countdown b { font-variant-numeric: tabular-nums; }
+.countdown.urgent { background: #fbe9e4; color: #963b2e; }
+.pager { display: flex; justify-content: center; flex-wrap: wrap; gap: 6px; margin-top: 16px; }
+.pager a { min-width: 34px; height: 34px; display: grid; place-items: center; padding: 0 9px; border-radius: 9px; border: 1px solid #d7e4d8; background: #fff; font-size: 12px; font-weight: 800; color: #2d5440; }
+.pager a[aria-current=page] { background: var(--green); border-color: var(--green); color: #fff; }
+.reply { margin: 10px 0; padding: 10px 12px; border-radius: 10px; background: #eef5e6; border-left: 3px solid var(--green); }
+.reply p { margin: 4px 0 0; font-size: 13px; white-space: pre-wrap; }
+.role-picker { border: 0; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; }
+.role-picker legend { font-size: 12px; font-weight: 800; margin-bottom: 7px; padding: 0; }
+.role-picker .product-option { grid-template-columns: auto 1fr; }
+.check { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; line-height: 1.5; }
+.check input { margin-top: 3px; accent-color: var(--green); }
+.policy-page .panel h2 { font-size: 15px; margin: 18px 0 6px; }
+.policy-page .panel h2:first-child { margin-top: 0; }
+.policy-page .panel p { font-size: 13px; line-height: 1.7; color: #3b4b45; margin: 0; }
+.payout-panel .sub-title { margin-top: 18px; }
+.quiz-fields legend small { color: var(--muted); font-weight: 650; margin-left: 4px; }
+.quote-sticky { display: none; }
+.data-table td .cell > small:only-child { margin-top: 0; }
+.row-actions .cell { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+.notice-row .actions form { display: inline-flex; }
+
+@media (max-width: 980px) {
+  .quote-sticky { position: fixed; z-index: 4; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 10px 16px max(10px, env(safe-area-inset-bottom)); background: #fffffff2; border-top: 1px solid var(--line); box-shadow: 0 -8px 22px #2b46351a; backdrop-filter: blur(10px); }
+  .quote-sticky small { display: block; color: var(--muted); font-size: 11px; font-weight: 750; }
+  .quote-sticky b { color: var(--green); font-size: 17px; }
+  .order-layout { padding-bottom: 76px; }
+  .console-mode #toast { bottom: 84px; }
+}
+
+@media (max-width: 640px) {
+  .role-picker { grid-template-columns: 1fr; }
+  /* 좁은 화면의 표는 한 행을 한 장의 카드로 보여 줍니다. */
+  .table-wrap { overflow: visible; margin: 0; padding: 0; }
+  .data-table, .data-table tbody, .data-table tr, .data-table td { display: block; width: 100%; }
+  .data-table thead { display: none; }
+  .data-table tr { border: 1px solid var(--line); border-radius: 12px; padding: 4px 12px; margin-bottom: 8px; background: #fff; }
+  .data-table tbody tr:hover td { background: none; }
+  .data-table td, .data-table.compact td { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; padding: 8px 0; min-width: 0 !important; border-bottom: 1px dashed #e7eee7; text-align: right; }
+  .data-table tr td:last-child { border-bottom: 0; }
+  .data-table td::before { content: attr(data-label); flex: none; max-width: 40%; color: var(--muted); font-size: 11px; font-weight: 750; text-align: left; padding-top: 1px; }
+  .data-table td[data-label=""]::before { content: none; }
+  .data-table td[data-label=""] { justify-content: flex-end; }
+  .data-table td:has(> .cell:empty) { display: none; }
+  .data-table td .cell { min-width: 0; overflow-wrap: anywhere; }
+  .data-table td small { margin-top: 2px; }
+  .data-table td.progress-cell .cell { flex: 1; max-width: 62%; }
+  .data-table td:first-child { font-size: 13px; }
+  .data-table td:first-child .cell { text-align: right; }
+}
