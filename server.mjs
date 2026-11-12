@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import { createHash, randomBytes, randomInt, scryptSync, timingSafeEqual } from 'node:crypto';
-import { mkdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync } from 'node:fs';
 import { dirname, resolve, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
@@ -20,6 +20,8 @@ const minDwell = process.env.ADSFORM_MIN_DWELL !== undefined
   ? { quiz: Number(process.env.ADSFORM_MIN_DWELL), survey: Number(process.env.ADSFORM_MIN_DWELL) }
   : { quiz: 3, survey: 10 };
 const payoutMinimum = { reward: 5000, revenue: 10000 };
+const payoutPendingLimit = 3;
+const backupDays = Number(process.env.ADSFORM_BACKUP_DAYS ?? (demo ? 0 : 14));
 const maxRate = 3000;
 const pageSize = 20;
 const dbPath = resolve(process.env.ADSFORM_DB || resolve(root, 'data', demo ? 'demo.sqlite' : 'adsform.sqlite'));
@@ -101,6 +103,16 @@ db.exec(`
     destination TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', reason TEXT NOT NULL DEFAULT '', created TEXT NOT NULL,
     decided TEXT, request_key TEXT NOT NULL, UNIQUE(user_id, request_key)
   );
+  CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), kind TEXT NOT NULL, title TEXT NOT NULL,
+    body TEXT NOT NULL DEFAULT '', link TEXT NOT NULL DEFAULT '', created TEXT NOT NULL, read TEXT
+  );
+  CREATE TABLE IF NOT EXISTS adjustments (
+    id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), wallet TEXT NOT NULL, amount INTEGER NOT NULL,
+    reason TEXT NOT NULL, actor INTEGER REFERENCES users(id), created TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS notifications_user ON notifications(user_id, id);
+  CREATE INDEX IF NOT EXISTS submissions_user ON submissions(user_id, status);
   CREATE INDEX IF NOT EXISTS submissions_created ON submissions(created);
   CREATE INDEX IF NOT EXISTS ledger_user_wallet ON ledger(user_id, wallet, created);
   INSERT OR IGNORE INTO settings VALUES ('background', 'grove'), ('default_rate', '750');
@@ -118,7 +130,8 @@ for (const [table, column, definition] of [
   ['reservations', 'created', 'INTEGER'],
   ['inquiries', 'reply', "TEXT NOT NULL DEFAULT ''"],
   ['inquiries', 'replied', 'TEXT'],
-  ['notices', 'updated', 'TEXT']
+  ['notices', 'updated', 'TEXT'],
+  ['users', 'last_login', 'TEXT']
 ]) {
   if (!db.prepare(`PRAGMA table_info(${table})`).all().some(item => item.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
 }
@@ -133,10 +146,15 @@ const setSetting = (key, value) => run('UPDATE settings SET value=? WHERE key=?'
 const balance = (id, wallet) => get('SELECT COALESCE(SUM(amount),0) AS total FROM ledger WHERE user_id=? AND wallet=?', id, wallet).total;
 const entry = (id, wallet, amount, kind, ref) => run('INSERT INTO ledger(user_id,wallet,amount,kind,ref,created) VALUES (?,?,?,?,?,?)', id, wallet, amount, kind, String(ref), now());
 const audit = (actor, action, subject, detail = '') => run('INSERT INTO audit(actor,action,subject,detail,created) VALUES (?,?,?,?,?)', actor, action, String(subject), detail, now());
+function notify(userId, kind, title, body = '', link = '') {
+  if (userId) run('INSERT INTO notifications(user_id,kind,title,body,link,created) VALUES (?,?,?,?,?,?)', userId, kind, title, body, link, now());
+}
+const won = value => `${Number(value).toLocaleString('ko-KR')}원`;
 const digest = token => createHash('sha256').update(token).digest('hex');
 const clean = user => user && ({ id: user.id, name: user.name, username: user.username, role: user.role, parent_id: user.parent_id,
   must_change: Boolean(user.must_change), is_demo: Boolean(user.is_demo) });
 const passHash = (password, salt = randomBytes(16).toString('hex')) => `${salt}:${scryptSync(password, salt, 64).toString('hex')}`;
+const dummyHash = passHash(randomBytes(16).toString('hex'));
 const checkPass = (password, saved) => timingSafeEqual(Buffer.from(passHash(password, saved.split(':')[0])), Buffer.from(saved));
 const count = (campaign, onlyApproved = false) => get(`SELECT COUNT(*) AS total FROM submissions WHERE campaign_id=? AND status ${onlyApproved ? "='approved'" : "IN ('approved','pending')"}`, campaign).total;
 const dayStart = (day = dateKst()) => new Date(Date.parse(day + 'T00:00:00+09:00')).toISOString();
@@ -205,8 +223,8 @@ function seedDemoHistory() {
   const chargeAt = (user, amount, day, approved = true, operatorId = null) => {
     const rate = operatorId ? Number(setting('default_rate')) : 0;
     const commission = approved ? Math.floor(amount * rate / 10000) : 0;
-    const charge = Number(run(`INSERT INTO charges(user_id,amount,status,created,decided,operator_id,rate,commission,request_key) VALUES (?,?,?,?,?,?,?,?,?)`,
-      user, amount, approved ? 'approved' : 'pending', kstStamp(day, 560), approved ? kstStamp(day, 640) : null, approved ? operatorId : null, approved ? rate : 0, commission, `seed-${user}-${day}-${amount}`).lastInsertRowid);
+    const charge = Number(run(`INSERT INTO charges(user_id,amount,vat,status,created,decided,operator_id,rate,commission,request_key) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      user, amount, Math.round(amount * 0.1), approved ? 'approved' : 'pending', kstStamp(day, 560), approved ? kstStamp(day, 640) : null, approved ? operatorId : null, approved ? rate : 0, commission, `seed-${user}-${day}-${amount}`).lastInsertRowid);
     if (!approved) return;
     ledgerAt.run(user, 'credit', amount, 'charge', String(charge), kstStamp(day, 640));
     if (commission) ledgerAt.run(operatorId, 'revenue', commission, 'commission', String(charge), kstStamp(day, 640));
@@ -395,6 +413,7 @@ function login(req, res, user) {
   run('DELETE FROM sessions WHERE expires < ?', Date.now());
   const token = randomBytes(32).toString('hex');
   run('INSERT INTO sessions VALUES (?,?,?)', digest(token), user.id, Date.now() + sessionHours * 3600_000);
+  run('UPDATE users SET last_login=? WHERE id=?', now(), user.id);
   setCookie(req, res, token, sessionHours * 3600);
   return { user: clean(user) };
 }
@@ -420,7 +439,9 @@ function authenticate(req, res, body) {
   const failKey = `login-fail:${username}`;
   assert(hits(failKey, 15 * 60_000) < 10, '비밀번호를 여러 번 틀려 15분간 로그인이 제한됩니다.', 429);
   const user = get('SELECT * FROM users WHERE username=?', username);
-  if (!(user && !user.is_demo && checkPass(password, user.password))) {
+  // 없는 아이디도 같은 시간이 걸리도록 비밀번호 검사를 한 번 수행합니다.
+  const matched = checkPass(password, user && !user.is_demo ? user.password : dummyHash);
+  if (!(user && !user.is_demo && matched)) {
     hit(failKey, 15 * 60_000);
     fail(401, '아이디 또는 비밀번호를 확인해 주세요.');
   }
@@ -430,7 +451,7 @@ function authenticate(req, res, body) {
 
 function accountFields(body) {
   const username = str(body.username, '아이디', 32, 4).toLowerCase();
-  assert(/^[a-z0-9][a-z0-9._-]+$/.test(username) && !username.startsWith('demo.'), '아이디는 영문 소문자, 숫자, 점, 밑줄, 하이픈을 사용할 수 있습니다.');
+  assert(/^[a-z0-9][a-z0-9._-]+$/.test(username) && !/^(demo|withdrawn)\./.test(username), '아이디는 영문 소문자, 숫자, 점, 밑줄, 하이픈을 사용할 수 있습니다.');
   const name = str(body.name, '이름', 60);
   return { username, name, password: newPassword(body.password) };
 }
@@ -505,6 +526,7 @@ function updateAccount(actor, body) {
     const target = get('SELECT * FROM users WHERE id=?', id);
     assert(target && target.role !== 'admin' && (actor.role === 'admin' || (target.role === 'agency' && target.parent_id === actor.id)), '계정을 찾을 수 없습니다.', 404);
     assert(!target.is_demo, '테스트 계정은 변경할 수 없습니다.', 403);
+    assert(target.status !== 'withdrawn', '탈퇴한 계정은 변경할 수 없습니다.', 409);
     let detail = body.action;
     if (body.action === 'suspend') {
       run("UPDATE users SET status='suspended' WHERE id=?", id);
@@ -575,6 +597,7 @@ const ledgerMemo = `CASE
     WHEN l.kind='charge' THEN '충전 #' || l.ref
     WHEN l.kind IN ('payout','payout_return') THEN '출금 신청 #' || l.ref
     WHEN l.kind='opening' THEN '데모 시작 잔액'
+    WHEN l.kind='adjust' THEN (SELECT '운영 조정 · ' || reason FROM adjustments WHERE id=CAST(l.ref AS INTEGER))
     ELSE l.ref END`;
 const ledgerRowsSql = `SELECT * FROM (SELECT l.id,l.wallet,l.amount,l.kind,l.ref,l.created,${ledgerMemo} AS memo,
     SUM(l.amount) OVER (PARTITION BY l.wallet ORDER BY l.created, l.id) AS after
@@ -611,12 +634,14 @@ function summary(user) {
   result.user.avatar = userProfile(user.id);
   result.ledger = ['credit', 'revenue', 'reward'].flatMap(wallet => all(`${ledgerRowsSql} LIMIT 30`, user.id, wallet));
   result.balances = Object.fromEntries(['credit', 'revenue', 'reward'].map(wallet => [wallet, balance(user.id, wallet)]));
+  result.notifications = all('SELECT id,kind,title,body,link,created,read FROM notifications WHERE user_id=? ORDER BY id DESC LIMIT 30', user.id);
+  result.unreadNotifications = get('SELECT COUNT(*) AS total FROM notifications WHERE user_id=? AND read IS NULL', user.id).total;
   result.myInquiries = all('SELECT id,subject,message,created,reviewed,reply,replied FROM inquiries WHERE user_id=? ORDER BY id DESC LIMIT 30', user.id);
   if (user.role === 'participant' || user.role === 'operator') {
     result.payouts = all('SELECT id,wallet,amount,destination,status,reason,created,decided FROM payouts WHERE user_id=? ORDER BY id DESC LIMIT 50', user.id);
   }
   if (user.role === 'participant') {
-    result.submissions = all('SELECT s.id,s.status,s.reason,s.created,c.title,c.kind,c.brand,c.reward FROM submissions s JOIN campaigns c ON s.campaign_id=c.id WHERE s.user_id=? ORDER BY s.created DESC, s.id DESC', user.id);
+    result.submissions = all('SELECT s.id,s.status,s.reason,s.created,s.response,c.title,c.kind,c.brand,c.reward FROM submissions s JOIN campaigns c ON s.campaign_id=c.id WHERE s.user_id=? ORDER BY s.created DESC, s.id DESC', user.id);
     result.trend = dailySum(`SELECT date(created,'+9 hours') AS day, SUM(amount) AS total FROM ledger
       WHERE created>=? AND user_id=? AND wallet='reward' AND kind='mission' GROUP BY day`, [user.id], 14);
   }
@@ -647,7 +672,7 @@ function summary(user) {
   if (user.role === 'admin') {
     const visible = 'u.username NOT GLOB \'demo.u[0-9]*\'';
     result.defaultRate = Number(setting('default_rate'));
-    result.accounts = all(`SELECT u.id,u.name,u.username,u.role,u.rate,u.status,u.is_demo,u.parent_id,p.name AS parent,
+    result.accounts = all(`SELECT u.id,u.name,u.username,u.role,u.rate,u.status,u.is_demo,u.parent_id,u.created,u.last_login,p.name AS parent,
       COALESCE((SELECT SUM(amount) FROM ledger WHERE user_id=u.id AND wallet='credit'),0) AS credit
       FROM users u LEFT JOIN users p ON u.parent_id=p.id WHERE (? OR u.is_demo=0) AND ${visible} ORDER BY u.id DESC`, Number(demo));
     result.roleCounts = Object.fromEntries(all('SELECT role, COUNT(*) AS total FROM users WHERE ? OR is_demo=0 GROUP BY role', Number(demo)).map(row => [row.role, row.total]));
@@ -691,7 +716,11 @@ function submissionPage(user, params) {
   const total = status ? counts[status] : counts.all;
   const pages = Math.max(1, Math.ceil(total / pageSize));
   const page = Math.min(Math.max(1, Number(params.get('page')) || 1), pages);
-  const items = all(`SELECT s.id,s.status,s.created,s.decided,s.response,s.reason,c.id AS campaign,c.title,c.kind,c.reward,u.name FROM submissions s
+  const items = all(`SELECT s.id,s.status,s.created,s.decided,s.response,s.reason,c.id AS campaign,c.title,c.kind,c.reward,c.prompt,u.name,s.user_id,
+    (SELECT COUNT(*) FROM submissions d WHERE d.campaign_id=s.campaign_id AND d.response=s.response AND d.id<>s.id) AS dupes,
+    (SELECT COUNT(*) FROM submissions x WHERE x.user_id=s.user_id AND x.status='approved') AS userApproved,
+    (SELECT COUNT(*) FROM submissions x WHERE x.user_id=s.user_id AND x.status='rejected') AS userRejected,
+    (SELECT created FROM users WHERE id=s.user_id) AS joined FROM submissions s
     JOIN campaigns c ON c.id=s.campaign_id JOIN users u ON u.id=s.user_id WHERE ${where} AND (?='' OR s.status=?)
     ORDER BY (s.status='pending') DESC, s.id DESC LIMIT ? OFFSET ?`, ...args, status, status, pageSize, (page - 1) * pageSize);
   return { items, counts, page, pages, total, pendingReward: get(`SELECT COALESCE(SUM(c.reward),0) AS total FROM submissions s JOIN campaigns c ON c.id=s.campaign_id
@@ -740,7 +769,7 @@ function report(user, id) {
       .map(({ name, ...row }) => ({ ...row, who: user.role === 'admin' ? name : `${[...name][0]}${'*'.repeat(Math.max(1, [...name].length - 1))}` }))
     : [];
   const history = all(`SELECT a.action,a.detail,a.created,u.name FROM audit a LEFT JOIN users u ON u.id=a.actor
-    WHERE a.subject=? AND a.action IN ('광고 주문 접수','캠페인 상태 변경','캠페인 종료·정산','메모 수정','주문 수정','주문 취소') ORDER BY a.created`, String(id));
+    WHERE a.subject=? AND a.action IN ('광고 주문 접수','캠페인 상태 변경','캠페인 종료·정산','메모 수정','주문 수정','주문 취소','캠페인 연장·증액') ORDER BY a.created`, String(id));
   return { id, notStarted, daily, hours: Array.from({ length: 24 }, (_, hour) => hours.find(item => item.hour === hour)?.total || 0), choices, responses, history };
 }
 
@@ -840,6 +869,7 @@ function decideCharge(user, body) {
     if (body.action === 'reject') {
       run("UPDATE charges SET status='rejected', decided=?, reason=? WHERE id=?", now(), reason, id);
       audit(user.id, '충전 반려', id, reason);
+      notify(charge.user_id, 'charge', `충전 #${id} 반려`, `${won(charge.amount)} 충전이 반려됐어요. 사유: ${reason}`, '/manage?tab=charges');
       return {};
     }
     const operator = charge.role === 'agency' && charge.parent_id
@@ -848,7 +878,11 @@ function decideCharge(user, body) {
     const commission = Math.floor(charge.amount * applied / 10000);
     run("UPDATE charges SET status='approved',decided=?,operator_id=?,rate=?,commission=? WHERE id=?", now(), operator?.id ?? null, applied, commission, id);
     entry(charge.user_id, 'credit', charge.amount, 'charge', id);
-    if (commission > 0) entry(operator.id, 'revenue', commission, 'commission', id);
+    if (commission > 0) {
+      entry(operator.id, 'revenue', commission, 'commission', id);
+      notify(operator.id, 'revenue', '대행사 충전 수익 적립', `하위 대행사 충전 ${won(charge.amount)} 승인으로 ${won(commission)}이 적립됐어요.`, '/manage?tab=revenue');
+    }
+    notify(charge.user_id, 'charge', `충전 #${id} 승인`, `${won(charge.amount)}이 광고 잔액에 반영됐어요.`, '/manage?tab=charges');
     audit(user.id, '충전 승인', id, `${charge.amount.toLocaleString('ko-KR')}원 · 실행사 수익 ${commission.toLocaleString('ko-KR')}원`);
     return { commission };
   });
@@ -917,16 +951,20 @@ function editCampaign(user, body) {
 }
 
 function settleCampaign(campaign) {
-  if (!campaign.owner_id) return;
+  if (!campaign.owner_id) return 0;
   const remaining = (campaign.goal - count(campaign.id, true)) * campaign.cost;
   if (remaining) entry(campaign.owner_id, 'credit', remaining, 'release', campaign.id);
+  return remaining;
 }
 
 function finishCampaign(campaign, reason, actor = null) {
   run("UPDATE campaigns SET status='closed',reason=? WHERE id=?", reason, campaign.id);
   run('DELETE FROM reservations WHERE campaign_id=?', campaign.id);
-  settleCampaign(campaign);
+  const returned = settleCampaign(campaign);
   audit(actor, '캠페인 종료·정산', campaign.id, reason);
+  if (actor !== campaign.owner_id) {
+    notify(campaign.owner_id, 'campaign', `‘${campaign.title}’ 종료·정산`, `${reason}로 캠페인이 끝났어요.${returned ? ` 미집행 예산 ${won(returned)}을 잔액으로 돌려드렸어요.` : ''}`, '/manage?tab=orders&status=closed');
+  }
 }
 
 const expiredCampaigns = `FROM campaigns c WHERE c.end_date<?
@@ -972,6 +1010,11 @@ function decideCampaign(user, body) {
     if (status === 'paused') run('DELETE FROM reservations WHERE campaign_id=?', id);
     if (status === 'rejected' || status === 'canceled') settleCampaign(campaign);
     audit(user.id, status === 'canceled' ? '주문 취소' : '캠페인 상태 변경', id, status);
+    if (admin && campaign.owner_id) {
+      const message = { active: campaign.status === 'pending' ? ['심사 승인', `${campaign.start_date}부터 참여를 받습니다.`] : ['운영 재개', '캠페인이 다시 열렸어요.'],
+        rejected: ['심사 반려', `사유: ${reason} 배정 예산은 잔액으로 돌려드렸어요.`], paused: ['운영팀 일시중지', '자세한 내용은 문의하기로 확인해 주세요.'] }[status];
+      if (message) notify(campaign.owner_id, 'campaign', `‘${campaign.title}’ ${message[0]}`, message[1], '/manage?tab=orders');
+    }
     return {};
   });
 }
@@ -1044,6 +1087,8 @@ function reviewOne(user, id, status, reason) {
   const campaign = get('SELECT * FROM campaigns WHERE id=?', submission.campaign_id);
   if (status === 'approved') rewardSubmission(id, submission.user_id, campaign);
   audit(user.id, '미션 검수', id, status);
+  notify(submission.user_id, 'mission', status === 'approved' ? `+${campaign.reward.toLocaleString('ko-KR')}P 적립` : '설문 응답 반려',
+    status === 'approved' ? `‘${campaign.title}’ 응답이 승인됐어요.` : `‘${campaign.title}’ 응답이 반려됐어요. 사유: ${reason}`, status === 'approved' ? '/manage?tab=rewards' : '/manage?tab=history&status=rejected');
   const approved = count(campaign.id, true);
   if (campaign.status !== 'closed') {
     if (approved >= campaign.goal) finishCampaign(campaign, '목표 건수 달성', user.id);
@@ -1110,8 +1155,10 @@ function replyInquiry(user, body) {
   const id = int(body.id, '문의 번호', 1, 1e9);
   const reply = str(body.reply, '답변', 2000, 2);
   return transaction(() => {
-    assert(get('SELECT id FROM inquiries WHERE id=?', id), '문의 내역을 찾을 수 없습니다.', 404);
+    const item = get('SELECT id,user_id,subject FROM inquiries WHERE id=?', id);
+    assert(item, '문의 내역을 찾을 수 없습니다.', 404);
     const time = now();
+    notify(item.user_id, 'inquiry', '문의 답변 도착', `‘${item.subject}’ 문의에 답변이 등록됐어요.`, '/manage?tab=profile#my-inquiries');
     run('UPDATE inquiries SET reply=?, replied=?, reviewed=COALESCE(reviewed, ?) WHERE id=?', reply, time, time, id);
     audit(user.id, '문의 답변', id);
     return {};
@@ -1131,6 +1178,7 @@ function requestPayout(user, body) {
       assert(existing.amount === amount, '요청 내용이 바뀌었습니다. 새로 제출해 주세요.', 409);
       return { id: existing.id };
     }
+    assert(get("SELECT COUNT(*) AS total FROM payouts WHERE user_id=? AND status='pending'", user.id).total < payoutPendingLimit, `처리 대기 중인 출금 신청이 ${payoutPendingLimit}건 있어요. 처리 후 다시 신청해 주세요.`, 409);
     assert(balance(user.id, wallet) >= amount, wallet === 'reward' ? '보유 포인트가 부족합니다.' : '출금 가능한 수익이 부족합니다.', 409);
     const id = Number(run('INSERT INTO payouts(user_id,wallet,amount,destination,created,request_key) VALUES (?,?,?,?,?,?)', user.id, wallet, amount, destination, now(), key).lastInsertRowid);
     entry(user.id, wallet, -amount, 'payout', id);
@@ -1154,6 +1202,9 @@ function decidePayout(user, body) {
     assert(payout, '출금 신청을 찾을 수 없습니다.', 404);
     assert(payout.status === 'pending', '이미 처리된 출금 신청입니다.', 409);
     closePayout(payout, body.action === 'approve' ? 'approved' : 'rejected', reason);
+    const unit = payout.wallet === 'reward' ? `${payout.amount.toLocaleString('ko-KR')}P` : won(payout.amount);
+    notify(payout.user_id, 'payout', body.action === 'approve' ? `출금 #${id} 지급 완료` : `출금 #${id} 반려`,
+      body.action === 'approve' ? `${unit}을 신청한 계좌로 보냈어요.` : `${unit}을 돌려드렸어요. 사유: ${reason}`, payout.wallet === 'reward' ? '/manage?tab=rewards' : '/manage?tab=revenue');
     audit(user.id, body.action === 'approve' ? '출금 승인' : '출금 반려', id, reason || String(payout.amount));
     return {};
   });
@@ -1168,6 +1219,162 @@ function cancelPayout(user, body) {
     assert(payout.status === 'pending', '이미 처리된 출금 신청입니다.', 409);
     closePayout(payout, 'canceled', '신청자 취소');
     audit(user.id, '출금 취소', id);
+    return {};
+  });
+}
+
+
+/* ---------- 캠페인 연장·증액 ---------- */
+function extendCampaign(user, body) {
+  role(user, partners);
+  const id = int(body.id, '캠페인 번호', 1, 1e9);
+  return transaction(() => {
+    const campaign = get('SELECT * FROM campaigns WHERE id=? AND owner_id=?', id, user.id);
+    assert(campaign, '캠페인을 찾을 수 없습니다.', 404);
+    assert(['active', 'paused'].includes(campaign.status) && campaign.end_date >= dateKst(), '진행 중이거나 일시중지된 캠페인만 연장·증액할 수 있습니다.', 409);
+    const goal = int(body.goal, '목표 수량', campaign.goal, 50000);
+    const end = date(body.end);
+    assert(end >= campaign.end_date, '종료일은 현재 종료일보다 앞당길 수 없습니다.');
+    const cap = body.daily_cap === undefined || body.daily_cap === '' || body.daily_cap === '0' ? null : int(body.daily_cap, '일일 한도', 1, goal);
+    if (cap) {
+      const days = Math.round((Date.parse(end) - Date.parse(campaign.start_date)) / 86_400_000) + 1;
+      assert(cap * days >= goal, `일일 한도 ${cap}건으로는 ${days}일 동안 목표 ${goal}건을 채울 수 없어요.`);
+    }
+    assert(goal !== campaign.goal || end !== campaign.end_date || cap !== campaign.daily_cap, '바뀐 내용이 없습니다.');
+    const extra = (goal - campaign.goal) * campaign.cost;
+    if (extra) {
+      assert(balance(user.id, 'credit') >= extra, `추가 예산 ${won(extra)}이 필요합니다. 먼저 충전을 신청해 주세요.`, 409);
+      entry(user.id, 'credit', -extra, 'reserve', `${id}.${Date.now()}`);
+    }
+    run('UPDATE campaigns SET goal=?, end_date=?, daily_cap=? WHERE id=?', goal, end, cap, id);
+    audit(user.id, '캠페인 연장·증액', id, `목표 ${campaign.goal}→${goal}건 · 종료 ${campaign.end_date}→${end}${extra ? ` · 추가 예산 ${won(extra)}` : ''}`);
+    return { extra };
+  });
+}
+
+/* ---------- CSV 내보내기 ---------- */
+const csvCell = value => {
+  let text = value === null || value === undefined ? '' : String(value);
+  if (/^[=+\-@\t\r]/.test(text)) text = "'" + text; // 스프레드시트 수식 실행 방지
+  return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+};
+const kst = value => value ? new Date(Date.parse(value) + 9 * 3600_000).toISOString().slice(0, 16).replace('T', ' ') : '';
+const statusKo = { pending: '대기', approved: '승인', rejected: '반려', canceled: '취소', active: '진행', paused: '일시중지', closed: '종료' };
+const walletKo = { credit: '광고 잔액', revenue: '실행사 수익', reward: '포인트' };
+const kindKo = { opening: '데모 시작 잔액', charge: '충전 승인', reserve: '예산 배정', release: '미집행 반환', commission: '대행사 충전 수익', mission: '미션 보상', payout: '출금 신청', payout_return: '출금 반환', adjust: '운영 조정' };
+const mask = name => `${[...name][0] || ''}${'*'.repeat(Math.max(1, [...name].length - 1))}`;
+
+function exportCsv(user, params) {
+  assert(user, '로그인이 필요합니다.', 401);
+  const type = params.get('type');
+  let name; let head; let rows;
+  if (type === 'responses') {
+    const id = int(params.get('id') || '', '캠페인 번호', 1, 1e9);
+    const campaign = get('SELECT * FROM campaigns WHERE id=?', id);
+    assert(campaign && canSeeCampaign(user, campaign), '내려받을 수 없는 캠페인입니다.', 404);
+    name = `campaign-${id}-responses`;
+    head = ['제출 번호', '제출 일시(KST)', '참여자', '응답', '상태', '처리 일시(KST)', '사유'];
+    rows = all('SELECT s.*,u.name FROM submissions s JOIN users u ON u.id=s.user_id WHERE s.campaign_id=? ORDER BY s.id', id)
+      .map(s => [s.id, kst(s.created), user.role === 'admin' ? s.name : mask(s.name), s.response, statusKo[s.status], kst(s.decided), s.reason]);
+  } else if (type === 'ledger') {
+    const wallet = params.get('wallet');
+    assert(['credit', 'revenue', 'reward'].includes(wallet), '지갑을 확인해 주세요.');
+    name = `ledger-${wallet}`;
+    head = ['일시(KST)', '구분', '내용', '금액', '거래 후 잔액'];
+    rows = all(ledgerRowsSql, user.id, wallet).reverse().map(l => [kst(l.created), kindKo[l.kind] || l.kind, l.memo || l.ref, l.amount, l.after]);
+  } else {
+    role(user, ['admin']);
+    if (type === 'charges') {
+      name = 'charges';
+      head = ['번호', '신청 일시(KST)', '신청 계정', '아이디', '충전액', '부가세', '상태', '처리 일시(KST)', '실행사', '수익률(%)', '실행사 수익', '사유'];
+      rows = all(`SELECT c.*,u.name,u.username,o.name AS op FROM charges c JOIN users u ON u.id=c.user_id LEFT JOIN users o ON o.id=c.operator_id ORDER BY c.id`)
+        .map(c => [c.id, kst(c.created), c.name, c.username, c.amount, c.vat, statusKo[c.status], kst(c.decided), c.op || '', c.rate / 100, c.commission, c.reason]);
+    } else if (type === 'payouts') {
+      name = 'payouts';
+      head = ['번호', '신청 일시(KST)', '신청 계정', '아이디', '구분', '금액', '받을 계좌', '상태', '처리 일시(KST)', '사유'];
+      rows = all('SELECT p.*,u.name,u.username FROM payouts p JOIN users u ON u.id=p.user_id ORDER BY p.id')
+        .map(p => [p.id, kst(p.created), p.name, p.username, walletKo[p.wallet], p.amount, p.destination, statusKo[p.status], kst(p.decided), p.reason]);
+    } else if (type === 'campaigns') {
+      name = 'campaigns';
+      head = ['번호', '주문 일시(KST)', '주문자', '캠페인', '브랜드', '상품', '시작일', '종료일', '목표', '승인', '반려', '건당 단가', '집행액', '반환액', '상태', '사유'];
+      rows = all(`SELECT c.*,u.name AS owner,
+        (SELECT COUNT(*) FROM submissions WHERE campaign_id=c.id AND status='approved') AS approved,
+        (SELECT COUNT(*) FROM submissions WHERE campaign_id=c.id AND status='rejected') AS rejected,
+        COALESCE((SELECT amount FROM ledger WHERE user_id=c.owner_id AND wallet='credit' AND kind='release' AND ref=CAST(c.id AS TEXT)),0) AS returned
+        FROM campaigns c LEFT JOIN users u ON u.id=c.owner_id WHERE c.owner_id IS NOT NULL OR ? ORDER BY c.id`, Number(demo))
+        .map(c => [c.id, kst(c.created), c.owner || '애즈폼 예시', c.title, c.brand, c.kind === 'quiz' ? '브랜드 퀴즈' : '설문 조사', c.start_date, c.end_date, c.goal, c.approved, c.rejected, c.cost, c.approved * c.cost, c.returned, statusKo[c.status] || c.status, c.reason]);
+    } else fail(400, '내려받을 항목을 확인해 주세요.');
+  }
+  const body = '﻿' + [head, ...rows].map(row => row.map(csvCell).join(',')).join('\r\n') + '\r\n';
+  return { name: `adsform-${name}-${dateKst()}.csv`, body };
+}
+
+/* ---------- 관리자 계정 상세·잔액 조정 ---------- */
+const walletFor = role => role === 'participant' ? ['reward'] : role === 'operator' ? ['credit', 'revenue'] : partners.includes(role) ? ['credit'] : [];
+
+function accountDetail(user, params) {
+  role(user, ['admin']);
+  const id = int(params.get('id') || '', '계정 번호', 1, 1e9);
+  const target = get('SELECT u.id,u.name,u.username,u.role,u.status,u.created,u.last_login,u.agreed,u.must_change,p.name AS parent FROM users u LEFT JOIN users p ON p.id=u.parent_id WHERE u.id=?', id);
+  assert(target, '계정을 찾을 수 없습니다.', 404);
+  const wallets = walletFor(target.role);
+  const submissions = Object.fromEntries(['pending', 'approved', 'rejected'].map(key => [key, 0]));
+  for (const row of all('SELECT status, COUNT(*) AS total FROM submissions WHERE user_id=? GROUP BY status', id)) submissions[row.status] = row.total;
+  return {
+    account: target, wallets, balances: Object.fromEntries(wallets.map(wallet => [wallet, balance(id, wallet)])), submissions,
+    campaigns: get("SELECT COUNT(*) AS total, SUM(status IN ('active','paused')) AS live FROM campaigns WHERE owner_id=?", id),
+    charged: get("SELECT COALESCE(SUM(amount),0) AS total FROM charges WHERE user_id=? AND status='approved'", id).total,
+    paid: get("SELECT COALESCE(SUM(amount),0) AS total FROM payouts WHERE user_id=? AND status='approved'", id).total,
+    ledger: all(`SELECT l.id,l.wallet,l.amount,l.kind,l.ref,l.created,${ledgerMemo} AS memo FROM ledger l WHERE l.user_id=? ORDER BY l.created DESC, l.id DESC LIMIT 12`, id),
+    recent: all('SELECT s.id,s.status,s.created,c.title FROM submissions s JOIN campaigns c ON c.id=s.campaign_id WHERE s.user_id=? ORDER BY s.id DESC LIMIT 8', id)
+  };
+}
+
+function adjustBalance(user, body) {
+  role(user, ['admin']);
+  const id = int(body.id, '계정 번호', 1, 1e9);
+  assert(typeof body.amount === 'string' || typeof body.amount === 'number', '조정 금액을 입력해 주세요.');
+  const raw = String(body.amount).trim();
+  assert(/^-?\d+$/.test(raw), '조정 금액은 정수로 입력해 주세요. 차감은 앞에 -를 붙입니다.');
+  const amount = Number(raw);
+  assert(amount !== 0 && Math.abs(amount) <= 10000000, '조정 금액은 1~10,000,000 사이로 입력해 주세요.');
+  const reason = str(body.reason, '조정 사유', 100, 2);
+  return transaction(() => {
+    const target = get('SELECT * FROM users WHERE id=?', id);
+    assert(target && target.role !== 'admin', '계정을 찾을 수 없습니다.', 404);
+    assert(walletFor(target.role).includes(body.wallet), '이 계정에서 조정할 수 없는 지갑입니다.');
+    assert(amount > 0 || balance(id, body.wallet) + amount >= 0, '차감 후 잔액이 0보다 작아집니다.', 409);
+    const ref = Number(run('INSERT INTO adjustments(user_id,wallet,amount,reason,actor,created) VALUES (?,?,?,?,?,?)', id, body.wallet, amount, reason, user.id, now()).lastInsertRowid);
+    entry(id, body.wallet, amount, 'adjust', ref);
+    const unit = body.wallet === 'reward' ? 'P' : '원';
+    audit(user.id, '잔액 조정', id, `${walletKo[body.wallet]} ${amount > 0 ? '+' : ''}${amount.toLocaleString('ko-KR')}${unit} · ${reason}`);
+    notify(id, 'adjust', `${walletKo[body.wallet]} ${amount > 0 ? '지급' : '차감'}`, `운영팀이 ${Math.abs(amount).toLocaleString('ko-KR')}${unit}을 ${amount > 0 ? '지급' : '차감'}했어요. 사유: ${reason}`,
+      body.wallet === 'reward' ? '/manage?tab=rewards' : body.wallet === 'revenue' ? '/manage?tab=revenue' : '/manage?tab=ledger');
+    return { balance: balance(id, body.wallet) };
+  });
+}
+
+/* ---------- 회원 탈퇴 ---------- */
+function withdraw(req, res, user, body) {
+  role(user, ['participant', 'advertiser']);
+  assert(!user.is_demo, '테스트 계정은 탈퇴할 수 없습니다.', 403);
+  assert(body.confirm === '탈퇴', '확인란에 ‘탈퇴’를 입력해 주세요.');
+  assert(checkPass(str(body.password, '비밀번호', 128), user.password), '비밀번호가 일치하지 않습니다.');
+  return transaction(() => {
+    assert(!get("SELECT 1 FROM payouts WHERE user_id=? AND status='pending'", user.id), '처리 중인 출금 신청이 있어요. 처리된 뒤 탈퇴해 주세요.', 409);
+    if (user.role === 'advertiser') {
+      assert(!get("SELECT 1 FROM campaigns WHERE owner_id=? AND status IN ('pending','active','paused')", user.id), '진행 중이거나 심사 중인 캠페인이 있어요. 종료하거나 취소한 뒤 탈퇴해 주세요.', 409);
+      const credit = balance(user.id, 'credit');
+      assert(credit <= 0, `광고 잔액 ${won(credit)}이 남아 있어요. 환불은 문의하기로 요청한 뒤 탈퇴해 주세요.`, 409);
+      run("UPDATE charges SET status='canceled', decided=?, reason='회원 탈퇴' WHERE user_id=? AND status='pending'", now(), user.id);
+    }
+    run("UPDATE users SET status='withdrawn', name='탈퇴 회원', username=?, password=? WHERE id=?", `withdrawn.${user.id}`, passHash(randomBytes(24).toString('hex')), user.id);
+    run('DELETE FROM sessions WHERE user_id=?', user.id);
+    run('DELETE FROM user_profiles WHERE user_id=?', user.id);
+    run('DELETE FROM reservations WHERE user_id=?', user.id);
+    run("UPDATE inquiries SET email='' WHERE user_id=?", user.id);
+    audit(user.id, '회원 탈퇴', user.id, user.role);
+    setCookie(req, res, '', 0);
     return {};
   });
 }
@@ -1199,6 +1406,14 @@ const routes = {
   '/api/charge/decision': (_req, _res, user, body) => decideCharge(user, body),
   '/api/campaign': (_req, _res, user, body) => createCampaign(user, body),
   '/api/campaign/edit': (_req, _res, user, body) => editCampaign(user, body),
+  '/api/campaign/extend': (_req, _res, user, body) => extendCampaign(user, body),
+  '/api/account/adjust': (_req, _res, user, body) => adjustBalance(user, body),
+  '/api/account/withdraw': (req, res, user, body) => withdraw(req, res, user, body),
+  '/api/notifications/read': (_req, _res, user) => {
+    role(user, roles);
+    run('UPDATE notifications SET read=? WHERE user_id=? AND read IS NULL', now(), user.id);
+    return {};
+  },
   '/api/campaign/decision': (_req, _res, user, body) => decideCampaign(user, body),
   '/api/mission/reserve': (_req, _res, user, body) => reserveMission(user, body),
   '/api/mission': (_req, _res, user, body) => submitMission(user, body),
@@ -1247,6 +1462,7 @@ const getRoutes = {
   '/api/report': (user, params) => report(user, int(params.get('id') || '', '캠페인 번호', 1, 1e9)),
   '/api/submissions': (user, params) => submissionPage(user, params),
   '/api/audit': (user, params) => auditPage(user, params),
+  '/api/account/detail': (user, params) => accountDetail(user, params),
   '/api/ledger': (user, params) => ledgerPage(user, params.get('wallet'), Math.max(1, Number(params.get('page')) || 1))
 };
 
@@ -1336,11 +1552,24 @@ async function avatarRequest(req, res, user, url) {
 
 const server = createServer(async (req, res) => {
   try {
+    // 로드밸런서 상태 확인은 Host 검사 전에 응답합니다.
+    if (req.url === '/healthz') {
+      get('SELECT 1 AS ok');
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+      return res.end('ok');
+    }
     req.site = siteFor(req);
+    if (req.site.secure) res.setHeader('Strict-Transport-Security', 'max-age=15552000');
     const url = new URL(req.url, req.site.origin);
     if (url.pathname.startsWith('/api/')) {
       const user = session(req, res);
       if (url.pathname === '/api/profile/avatar') return await avatarRequest(req, res, user, url);
+      if (req.method === 'GET' && url.pathname === '/api/export') {
+        const { name, body } = exportCsv(user, url.searchParams);
+        res.writeHead(200, { ...headers, 'Content-Type': 'text/csv; charset=utf-8', 'Cache-Control': 'no-store',
+          'Content-Disposition': `attachment; filename="${name}"; filename*=UTF-8''${encodeURIComponent(name)}` });
+        return res.end(body);
+      }
       if (req.method === 'GET' && Object.hasOwn(getRoutes, url.pathname)) return json(res, 200, getRoutes[url.pathname](user, url.searchParams));
       if (req.method === 'POST' && Object.hasOwn(routes, url.pathname)) {
         assert(req.headers.origin === req.site.origin, '같은 사이트에서 요청해 주세요.', 403);
@@ -1383,4 +1612,28 @@ const server = createServer(async (req, res) => {
 setInterval(() => {
   try { expireCampaigns(); } catch (error) { console.error(error); }
 }, 60_000).unref();
+
+/* ---------- 자동 백업 (운영 모드 기본 14일 보관) ---------- */
+const backupDir = resolve(dirname(dbPath), 'backups');
+function backup() {
+  if (!backupDays) return;
+  mkdirSync(backupDir, { recursive: true });
+  const target = resolve(backupDir, `adsform-${dateKst()}.sqlite`);
+  if (!existsSync(target)) db.prepare('VACUUM INTO ?').run(target);
+  const cutoff = shiftDay(dateKst(), -backupDays + 1);
+  for (const file of readdirSync(backupDir)) {
+    const day = file.match(/^adsform-(\d{4}-\d{2}-\d{2})\.sqlite$/)?.[1];
+    if (day && day < cutoff) unlinkSync(resolve(backupDir, file));
+  }
+}
+try { backup(); } catch (error) { console.error('backup failed', error); }
+setInterval(() => { try { backup(); } catch (error) { console.error('backup failed', error); } }, 3600_000).unref();
+
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.once(signal, () => {
+    server.close();
+    try { db.close(); } catch { /* 이미 닫힘 */ }
+    process.exit(0);
+  });
+}
 server.listen(port, bindHost, () => console.log(`Adsform  http://${bindHost}:${port}${shareOrigin ? `  (public ${shareOrigin.origin})` : ''}${demo ? '  [demo]' : ''}`));

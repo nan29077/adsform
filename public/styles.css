@@ -803,3 +803,41 @@ dialog.wide { max-width: min(calc(100% - 26px),880px); }
   .data-table td:first-child { font-size: 13px; }
   .data-table td:first-child .cell { text-align: right; }
 }
+
+/* ---------- 2026-11-12 고도화 ---------- */
+.unread-count { position: absolute; top: 2px; right: 0; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px; background: #d4553f; color: #fff;
+  font: 700 10px/17px inherit; font-style: normal; text-align: center; box-shadow: 0 0 0 2px #fff; }
+.console-head-side .notice-bell, .console-mobile-bar .notice-bell { width: 38px; height: 38px; }
+.console-mobile-bar .mobile-bell { margin-left: auto; }
+.console-mobile-bar .mobile-bell + .console-mobile-profile { margin-left: 0; }
+@media (max-width: 800px) { .console-head-side .notice-bell { display: none; } }
+.notify-list { list-style: none; margin: 0 0 6px; padding: 0; display: grid; gap: 6px; }
+.notify-list a { display: grid; gap: 3px; padding: 10px 12px; border-radius: 10px; background: #f6f8f5; color: inherit; text-decoration: none; border-left: 3px solid transparent; }
+.notify-list a:hover, .notify-list a:focus-visible { background: #edf3ea; }
+.notify-list .unread a { background: #eef5e6; border-left-color: var(--green); }
+.notify-list b { font-size: 13px; }
+.notify-list span { font-size: 12.5px; color: var(--ink, inherit); overflow-wrap: anywhere; }
+.notify-list small { color: var(--muted); font-size: 11px; }
+.report-actions { margin: 4px 0 10px; }
+.btn svg { vertical-align: -3px; }
+.btn.small svg { width: 15px; height: 15px; }
+.review-question { margin: 6px 0 0; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.review-question small { display: inline-block; margin-right: 4px; padding: 1px 6px; border-radius: 5px; background: #eef1ec; font-weight: 700; font-size: 10.5px; }
+.review-signals { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.review-signals span { padding: 2px 8px; border-radius: 999px; background: #f1f4ef; color: var(--muted); font-size: 11px; font-weight: 600; }
+.review-signals .flag { background: #fdecea; color: #b2412d; }
+.my-answer { margin-top: 2px; font-size: 12px; }
+.my-answer summary { cursor: pointer; color: var(--green); font-weight: 600; }
+.my-answer p { margin: 4px 0 0; padding: 7px 9px; border-radius: 7px; background: #f4f7f2; white-space: pre-wrap; }
+.account-detail { margin-bottom: 6px; }
+.account-detail .table-wrap { max-height: 280px; overflow: auto; }
+.plain-list { margin: 8px 0 12px; padding-left: 18px; font-size: 13px; color: var(--muted); display: grid; gap: 4px; }
+.withdraw-panel summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--muted); }
+.extend-quote { margin: 4px 0; }
+.status.withdrawn { background: #eceeea; color: #6b716a; }
+.extend-quote dl { display: grid; gap: 6px; margin: 0; padding: 12px 14px; border-radius: 10px; background: #f4f7f2; }
+.extend-quote dl > div { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; }
+.extend-quote dt { color: var(--muted); }
+.extend-quote dd { margin: 0; font-weight: 700; }
+.extend-quote dd.minus { color: #c0392b; }
+.extend-quote .quote-warn { margin: 8px 0 0; }
