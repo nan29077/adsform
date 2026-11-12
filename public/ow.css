@@ -1,0 +1,59 @@
+@font-face {
+  font-family: "Pretendard";
+  src: url("/assets/fonts/PretendardSubset.woff2") format("woff2-variations"), url("/assets/fonts/PretendardSubset.woff2") format("woff2");
+  font-weight: 45 920;
+  font-display: swap;
+}
+:root {
+  font-family: "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
+  color: #192824;
+  background: #f7f9f6;
+  --green: #176344;
+  --deep: #12382a;
+  --lime: #e4f79b;
+  --line: #e2eae2;
+  --muted: #596863;
+  --red: #b5462f;
+}
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 300px; min-height: 100vh; display: flex; flex-direction: column; background: linear-gradient(180deg, #eaf3e4 0, #f7f9f6 240px); }
+body, button, input, textarea { font: inherit; }
+h1, p { margin: 0; }
+:focus-visible { outline: 2px solid #338754; outline-offset: 3px; }
+[hidden] { display: none !important; }
+.ow { width: 100%; max-width: 560px; margin: 0 auto; padding: max(18px, env(safe-area-inset-top)) 18px 24px; flex: 1; outline: none; }
+.ow-loading { padding: 80px 0; text-align: center; color: var(--muted); }
+.ow-preview { margin-bottom: 14px; padding: 9px 12px; border-radius: 10px; background: #fff3d6; color: #7a5410; font-size: 13px; font-weight: 700; text-align: center; }
+.ow-head { padding: 8px 2px 18px; }
+.ow-tag { display: inline-block; padding: 5px 10px; border-radius: 99px; background: var(--deep); color: var(--lime); font-size: 12px; font-weight: 750; }
+.ow-head h1 { margin-top: 12px; font-size: 25px; line-height: 1.32; letter-spacing: -.04em; word-break: keep-all; }
+.ow-reward { margin-top: 10px; color: var(--muted); font-size: 14px; }
+.ow-reward b { color: var(--green); font-size: 18px; font-weight: 850; }
+.ow-intro { padding: 16px 18px; border: 1px solid var(--line); border-radius: 16px; background: #fff; color: #31423c; font-size: 15px; line-height: 1.7; word-break: keep-all; }
+.ow-notice { margin-top: 14px; padding: 12px 14px; border-radius: 12px; background: #fde9e4; color: var(--red); font-size: 14px; font-weight: 650; }
+.ow-form { display: grid; gap: 14px; margin-top: 16px; }
+.ow-question { margin: 0; padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: #fff; display: grid; gap: 9px; }
+.ow-question legend { float: left; width: 100%; margin-bottom: 4px; padding: 0; font-size: 16px; font-weight: 750; line-height: 1.5; word-break: keep-all; }
+.ow-question legend span { display: inline-block; margin-right: 7px; color: var(--green); font-weight: 850; }
+.ow-choice { display: flex; align-items: center; gap: 10px; min-height: 50px; padding: 12px 14px; border: 1.5px solid var(--line); border-radius: 12px; cursor: pointer; font-size: 15px; transition: border-color .15s, background .15s; }
+.ow-choice input { width: 19px; height: 19px; margin: 0; accent-color: var(--green); flex: none; }
+.ow-choice:has(input:checked) { border-color: var(--green); background: #eef7e9; font-weight: 700; }
+.ow-question textarea { width: 100%; min-height: 110px; padding: 12px 14px; border: 1.5px solid var(--line); border-radius: 12px; resize: vertical; font-size: 15px; line-height: 1.6; }
+.ow-question textarea:focus { border-color: var(--green); outline: none; }
+.ow-error { color: var(--red); font-size: 14px; font-weight: 650; }
+.ow-hint { color: var(--muted); font-size: 13px; text-align: center; }
+.ow-submit { position: sticky; bottom: max(12px, env(safe-area-inset-bottom)); min-height: 56px; border: 0; border-radius: 15px; background: var(--green); color: #fff; font-size: 17px; font-weight: 800; box-shadow: 0 10px 24px #17634433; cursor: pointer; }
+.ow-submit:disabled { background: #8aa79a; box-shadow: none; cursor: default; }
+.ow-result { margin-top: 12vh; padding: 34px 22px; border-radius: 22px; background: #fff; border: 1px solid var(--line); text-align: center; display: grid; justify-items: center; gap: 12px; }
+.ow-result h1 { font-size: 23px; letter-spacing: -.04em; }
+.ow-result p { color: var(--muted); font-size: 15px; line-height: 1.65; word-break: keep-all; }
+.ow-mark { display: grid; place-items: center; width: 70px; height: 70px; border-radius: 50%; }
+.ow-result.done .ow-mark { background: #e3f3d8; color: var(--green); }
+.ow-result.wait .ow-mark { background: #fff1d1; color: #a26d08; }
+.ow-result.fail .ow-mark { background: #f6e6e1; color: var(--red); }
+.ow-preview-note { font-size: 13px !important; color: #7a5410 !important; }
+.ow-foot { display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap; padding: 16px 18px max(18px, env(safe-area-inset-bottom)); color: var(--muted); font-size: 13px; }
+.ow-foot span { font-weight: 850; color: var(--deep); }
+.ow-foot b { color: #46a06c; }
+.ow-foot small { width: 100%; text-align: center; font-size: 12px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }

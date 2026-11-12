@@ -5,6 +5,7 @@ import { dirname, resolve, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 import { DatabaseSync } from 'node:sqlite';
+import { setupOfferwall } from './offerwall.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.ADSFORM_PORT || 3063);
@@ -398,7 +399,9 @@ setInterval(() => {
   const cutoff = Date.now() - 3600_000;
   for (const [key, list] of buckets) if (!list.length || list.at(-1) < cutoff) buckets.delete(key);
 }, 600_000).unref();
-const clientIp = req => (trustProxy && String(req.headers['x-forwarded-for'] || '').split(',')[0].trim()) || req.socket.remoteAddress || 'unknown';
+// X-Forwarded-For의 앞쪽 값은 접속자가 마음대로 넣을 수 있으므로, 신뢰하는 프록시가 마지막에 덧붙인 값만 씁니다.
+const forwardedIp = req => String(req.headers['x-forwarded-for'] || '').split(',').map(item => item.trim()).filter(Boolean).at(-1);
+const clientIp = req => (trustProxy && forwardedIp(req)) || req.socket.remoteAddress || 'unknown';
 
 /* ---------- 세션 ---------- */
 const sessionHours = 8;
@@ -696,7 +699,8 @@ function summary(user) {
       pendingSubmissions: get(`SELECT COUNT(*) AS total FROM submissions s JOIN users u ON u.id=s.user_id
         WHERE s.status='pending' AND (? OR u.is_demo=0)`, Number(demo)).total,
       unreadInquiries: get('SELECT COUNT(*) AS total FROM inquiries WHERE reviewed IS NULL').total,
-      pendingPayouts: get("SELECT COUNT(*) AS total FROM payouts WHERE status='pending'").total
+      pendingPayouts: get("SELECT COUNT(*) AS total FROM payouts WHERE status='pending'").total,
+      offerwallPending: ow.pendingCount()
     };
   }
   return result;
@@ -1493,6 +1497,10 @@ async function payload(req) {
 const headers = {
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
+  'X-Frame-Options': 'DENY',
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Resource-Policy': 'same-origin',
+  'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
   'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
 };
 const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' };
@@ -1530,6 +1538,12 @@ function siteFor(req) {
   return { host, origin: `http://${host}`, secure: false };
 }
 
+// 외부 오퍼월 연동(매체용 API·참여 페이지·관리자 기능)은 offerwall.mjs에 있습니다.
+const ow = setupOfferwall({ db, get, all, run, transaction, audit, assert, fail, str, int, date, limit, hits: key => hits(key, 60_000), hit: key => hit(key, 60_000), clientIp, now, dateKst, dayStart, session, json, headers, readBody,
+  root, dataDir: dirname(dbPath), allowPrivate: !shareOrigin && process.env.ADSFORM_OFFERWALL_ALLOW_PRIVATE === '1' });
+Object.assign(routes, ow.routes);
+Object.assign(getRoutes, ow.getRoutes);
+
 async function avatarRequest(req, res, user, url) {
   role(user, roles);
   if (req.method === 'GET' || req.method === 'HEAD') {
@@ -1561,6 +1575,7 @@ const server = createServer(async (req, res) => {
     req.site = siteFor(req);
     if (req.site.secure) res.setHeader('Strict-Transport-Security', 'max-age=15552000');
     const url = new URL(req.url, req.site.origin);
+    if (url.pathname.startsWith('/ow/')) return await ow.handle(req, res, url);
     if (url.pathname.startsWith('/api/')) {
       const user = session(req, res);
       if (url.pathname === '/api/profile/avatar') return await avatarRequest(req, res, user, url);
@@ -1570,17 +1585,17 @@ const server = createServer(async (req, res) => {
           'Content-Disposition': `attachment; filename="${name}"; filename*=UTF-8''${encodeURIComponent(name)}` });
         return res.end(body);
       }
-      if (req.method === 'GET' && Object.hasOwn(getRoutes, url.pathname)) return json(res, 200, getRoutes[url.pathname](user, url.searchParams));
+      if (req.method === 'GET' && Object.hasOwn(getRoutes, url.pathname)) return json(res, 200, getRoutes[url.pathname](user, url.searchParams, req));
       if (req.method === 'POST' && Object.hasOwn(routes, url.pathname)) {
         assert(req.headers.origin === req.site.origin, '같은 사이트에서 요청해 주세요.', 403);
         const body = await payload(req);
-        return json(res, 200, routes[url.pathname](req, res, user, body));
+        return json(res, 200, await routes[url.pathname](req, res, user, body));
       }
       fail(404, '요청한 기능을 찾을 수 없습니다.');
     }
     if (['GET', 'HEAD'].includes(req.method)) {
       const pathname = pages.includes(url.pathname) ? '/index.html' : url.pathname;
-      const allowed = ['/index.html', '/app.js', '/styles.css', '/icon.svg'].includes(pathname)
+      const allowed = ['/index.html', '/app.js', '/styles.css', '/icon.svg', '/offerwall-admin.js', '/ow.js', '/ow.css'].includes(pathname)
         || /^\/assets\/[a-z-]+\.(jpg|webp)$/.test(pathname) || /^\/assets\/fonts\/[A-Za-z-]+\.woff2$/.test(pathname);
       if (allowed) {
         const file = staticFile(pathname);

@@ -1,3 +1,5 @@
+import { setupOfferwallAdmin } from './offerwall-admin.js';
+
 const icons = {
   home: '<path d="m3 10 9-7 9 7v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 21v-7h6v7"/>',
   target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>',
@@ -452,6 +454,7 @@ function openSupport() {
 const consoleNav = {
   admin: [
     ['운영', [['overview', '운영 대시보드', 'grid'], ['orders', '주문 심사', 'bag'], ['submissions', '미션 검수', 'survey'], ['charges', '충전 승인', 'card'], ['payouts', '출금 승인', 'wallet']]],
+    ['외부 오퍼월', [['offerwall', '오퍼월 연동', 'target']]],
     ['설정', [['partners', '계정·수익률', 'people'], ['notices', '공지사항', 'bell'], ['inquiries', '문의 내역', 'chat'], ['audit', '운영 기록', 'history'], ['design', 'PC 배경', 'star']]]
   ],
   participant: [
@@ -823,6 +826,8 @@ const actions = {
   approve: '승인', reject: '반려', pause: '일시중지', resume: '재개', close: '종료·정산', cancel: '취소', suspend: '이용 정지', activate: '정지 해제'
 };
 const decision = (scope, id, action, label = actions[action]) => btn(label, `type="button" data-decision="${scope}" data-id="${id}" data-action="${action}" data-label="${esc(label)}"`, action === 'approve' ? 'primary small' : 'quiet small');
+const owAdmin = setupOfferwallAdmin({ api, esc, format, field, textarea, select, btn, empty, panelHead, icon, modal, dialog, dateTime, day, pager, showToast, decision, today: () => state.date });
+asyncViews.offerwall = params => owAdmin.view(params);
 const findOrder = id => state.campaigns?.find(item => item.id === id) || state.agencyCampaigns?.find(item => item.id === id);
 
 function orderCard(c, allowActions) {
@@ -1456,10 +1461,10 @@ function manage(params) {
   const [tab, title] = pages.find(([key]) => key === requested) || pages[0];
   const missing = requested && requested !== tab;
   const badges = admin ? { orders: state.campaigns.filter(c => c.status === 'pending').length, submissions: state.adminCounts.pendingSubmissions,
-    charges: state.charges.filter(c => c.status === 'pending').length, inquiries: state.adminCounts.unreadInquiries, payouts: state.adminCounts.pendingPayouts } : {};
+    charges: state.charges.filter(c => c.status === 'pending').length, inquiries: state.adminCounts.unreadInquiries, payouts: state.adminCounts.pendingPayouts, offerwall: state.adminCounts.offerwallPending } : {};
   const views = { overview: () => overview(user), new: () => orderForm(params), orders: () => orders(params, admin), charges: () => charges(params, admin), ledger: () => ledgerView(params),
     partners: () => partnerAdmin(params), notices, design, inquiries: () => inquiries(params), agencies, revenue: () => revenue(params), submissions: () => submissions(params),
-    history: () => participantHistory(params), rewards: () => participantRewards(params), profile: () => consoleProfile(user), payouts: () => payoutsAdmin(params), audit: () => auditView(params) };
+    history: () => participantHistory(params), rewards: () => participantRewards(params), profile: () => consoleProfile(user), payouts: () => payoutsAdmin(params), audit: () => auditView(params), offerwall: () => asyncSlot('offerwall', params) };
   const banners = [
     missing ? `<p class="notice">${requested === 'new' ? '광고 주문은 광고주·대행사·실행사 계정에서 할 수 있어요.' : '이 계정에서 사용할 수 없는 메뉴라 대시보드를 보여 드려요.'}</p>` : '',
     user.must_change && tab !== 'profile' ? `<p class="notice warn">${icon('lock')} 운영팀이 만든 임시 비밀번호를 쓰고 있어요. <a href="/manage?tab=profile#password-form">비밀번호 변경하기</a></p>` : ''
@@ -1573,6 +1578,7 @@ document.addEventListener('click', event => {
   const button = event.target.closest('button');
   if (!button || !state) return;
   const d = button.dataset;
+  if (state.user?.role === 'admin' && owAdmin.click(button)) return;
   if ('consoleClose' in d) setConsoleMenu(false);
   if ('consoleMenu' in d) setConsoleMenu(button.getAttribute('aria-expanded') !== 'true');
   if ('slide' in d || 'nextBanner' in d) {
@@ -1672,6 +1678,7 @@ document.addEventListener('input', event => {
   if (form?.dataset.form === 'campaign/edit') syncAnswerOptions(form);
   if (form?.dataset.form === 'campaign/extend') updateExtendForm(form);
   if (form?.dataset.form === 'charge') updateChargeForm(form);
+  if (form?.dataset.form?.startsWith('offerwall/')) owAdmin.input(event);
   if (form?.dataset.form === 'account' && event.target.name === 'role') {
     const parent = form.querySelector('.parent-field');
     parent.hidden = event.target.value !== 'agency';
@@ -1708,6 +1715,11 @@ document.addEventListener('submit', event => {
     if (path === 'password' && data.password !== data.confirm) throw new Error('새 비밀번호 확인이 일치하지 않습니다.');
     if (path === 'mission/review/bulk') data.ids = data.ids.split(',').map(Number);
     const result = await api('/api/' + path, data);
+    if (path.startsWith('offerwall/')) {
+      if (dialog.open) dialog.close();
+      await reload();
+      return owAdmin.after(path, result) || showToast('처리했습니다.');
+    }
     if (path === 'mission/reserve') {
       await reload();
       openMission(Number(data.id));
