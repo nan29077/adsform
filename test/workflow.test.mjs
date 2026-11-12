@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtempSync, readFileSync, rmSync, rmdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -251,7 +251,6 @@ test('로컬 역할 권한, 대행사 수익, 광고 집행과 보상', { timeou
   } finally {
     if (server.exitCode === null) server.kill();
     await exit;
-    for (const suffix of ['', '-shm', '-wal']) rmSync(db + suffix, { force: true });
-    rmdirSync(dir);
+    rmSync(dir, { recursive: true, force: true });
   }
 });

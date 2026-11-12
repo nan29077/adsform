@@ -599,6 +599,7 @@ const ledgerMemo = `CASE
     WHEN l.kind='commission' THEN (SELECT u.name || ' · 충전 #' || ch.id FROM charges ch JOIN users u ON u.id=ch.user_id WHERE ch.id=CAST(l.ref AS INTEGER))
     WHEN l.kind='charge' THEN '충전 #' || l.ref
     WHEN l.kind IN ('payout','payout_return') THEN '출금 신청 #' || l.ref
+    WHEN l.kind IN ('ow_reserve','ow_release') THEN (SELECT '오퍼월 · ' || title FROM ow_offers WHERE id=CAST(l.ref AS INTEGER))
     WHEN l.kind='opening' THEN '데모 시작 잔액'
     WHEN l.kind='adjust' THEN (SELECT '운영 조정 · ' || reason FROM adjustments WHERE id=CAST(l.ref AS INTEGER))
     ELSE l.ref END`;
@@ -700,7 +701,7 @@ function summary(user) {
         WHERE s.status='pending' AND (? OR u.is_demo=0)`, Number(demo)).total,
       unreadInquiries: get('SELECT COUNT(*) AS total FROM inquiries WHERE reviewed IS NULL').total,
       pendingPayouts: get("SELECT COUNT(*) AS total FROM payouts WHERE status='pending'").total,
-      offerwallPending: ow.pendingCount()
+      offerwallPending: ow.counts().review + ow.counts().pending
     };
   }
   return result;
@@ -1265,7 +1266,7 @@ const csvCell = value => {
 const kst = value => value ? new Date(Date.parse(value) + 9 * 3600_000).toISOString().slice(0, 16).replace('T', ' ') : '';
 const statusKo = { pending: '대기', approved: '승인', rejected: '반려', canceled: '취소', active: '진행', paused: '일시중지', closed: '종료' };
 const walletKo = { credit: '광고 잔액', revenue: '실행사 수익', reward: '포인트' };
-const kindKo = { opening: '데모 시작 잔액', charge: '충전 승인', reserve: '예산 배정', release: '미집행 반환', commission: '대행사 충전 수익', mission: '미션 보상', payout: '출금 신청', payout_return: '출금 반환', adjust: '운영 조정' };
+const kindKo = { opening: '데모 시작 잔액', charge: '충전 승인', reserve: '예산 배정', release: '미집행 반환', commission: '대행사 충전 수익', mission: '미션 보상', payout: '출금 신청', payout_return: '출금 반환', adjust: '운영 조정', ow_reserve: '오퍼월 예산 배정', ow_release: '오퍼월 미집행 반환' };
 const mask = name => `${[...name][0] || ''}${'*'.repeat(Math.max(1, [...name].length - 1))}`;
 
 function exportCsv(user, params) {
@@ -1367,7 +1368,7 @@ function withdraw(req, res, user, body) {
   return transaction(() => {
     assert(!get("SELECT 1 FROM payouts WHERE user_id=? AND status='pending'", user.id), '처리 중인 출금 신청이 있어요. 처리된 뒤 탈퇴해 주세요.', 409);
     if (user.role === 'advertiser') {
-      assert(!get("SELECT 1 FROM campaigns WHERE owner_id=? AND status IN ('pending','active','paused')", user.id), '진행 중이거나 심사 중인 캠페인이 있어요. 종료하거나 취소한 뒤 탈퇴해 주세요.', 409);
+      assert(!get("SELECT 1 FROM campaigns WHERE owner_id=? AND status IN ('pending','active','paused')", user.id) && !ow.hasLive(user.id), '진행 중이거나 심사 중인 캠페인이 있어요. 종료하거나 취소한 뒤 탈퇴해 주세요.', 409);
       const credit = balance(user.id, 'credit');
       assert(credit <= 0, `광고 잔액 ${won(credit)}이 남아 있어요. 환불은 문의하기로 요청한 뒤 탈퇴해 주세요.`, 409);
       run("UPDATE charges SET status='canceled', decided=?, reason='회원 탈퇴' WHERE user_id=? AND status='pending'", now(), user.id);
@@ -1539,7 +1540,7 @@ function siteFor(req) {
 }
 
 // 외부 오퍼월 연동(매체용 API·참여 페이지·관리자 기능)은 offerwall.mjs에 있습니다.
-const ow = setupOfferwall({ db, get, all, run, transaction, audit, assert, fail, str, int, date, limit, hits: key => hits(key, 60_000), hit: key => hit(key, 60_000), clientIp, now, dateKst, dayStart, session, json, headers, readBody,
+const ow = setupOfferwall({ db, get, all, run, transaction, audit, notify, entry, balance, won, demo, setting, assert, fail, str, int, date, limit, hits: key => hits(key, 60_000), hit: key => hit(key, 60_000), clientIp, now, dateKst, dayStart, session, json, headers, readBody,
   root, dataDir: dirname(dbPath), allowPrivate: !shareOrigin && process.env.ADSFORM_OFFERWALL_ALLOW_PRIVATE === '1' });
 Object.assign(routes, ow.routes);
 Object.assign(getRoutes, ow.getRoutes);
@@ -1579,6 +1580,8 @@ const server = createServer(async (req, res) => {
     if (url.pathname.startsWith('/api/')) {
       const user = session(req, res);
       if (url.pathname === '/api/profile/avatar') return await avatarRequest(req, res, user, url);
+      if (url.pathname === '/api/offerwall/asset' && req.method === 'POST') return json(res, 200, await ow.uploadAsset(req, user, url));
+      if (url.pathname === '/api/offerwall/proof' && req.method === 'GET') return await ow.proofImage(req, res, user, url);
       if (req.method === 'GET' && url.pathname === '/api/export') {
         const { name, body } = exportCsv(user, url.searchParams);
         res.writeHead(200, { ...headers, 'Content-Type': 'text/csv; charset=utf-8', 'Cache-Control': 'no-store',
@@ -1595,7 +1598,7 @@ const server = createServer(async (req, res) => {
     }
     if (['GET', 'HEAD'].includes(req.method)) {
       const pathname = pages.includes(url.pathname) ? '/index.html' : url.pathname;
-      const allowed = ['/index.html', '/app.js', '/styles.css', '/icon.svg', '/offerwall-admin.js', '/ow.js', '/ow.css'].includes(pathname)
+      const allowed = ['/index.html', '/app.js', '/styles.css', '/icon.svg', '/offerwall-console.js', '/ow.js', '/ow.css'].includes(pathname)
         || /^\/assets\/[a-z-]+\.(jpg|webp)$/.test(pathname) || /^\/assets\/fonts\/[A-Za-z-]+\.woff2$/.test(pathname);
       if (allowed) {
         const file = staticFile(pathname);

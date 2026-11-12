@@ -42,7 +42,7 @@ h1, p { margin: 0; }
 .ow-question textarea:focus { border-color: var(--green); outline: none; }
 .ow-error { color: var(--red); font-size: 14px; font-weight: 650; }
 .ow-hint { color: var(--muted); font-size: 13px; text-align: center; }
-.ow-submit { position: sticky; bottom: max(12px, env(safe-area-inset-bottom)); min-height: 56px; border: 0; border-radius: 15px; background: var(--green); color: #fff; font-size: 17px; font-weight: 800; box-shadow: 0 10px 24px #17634433; cursor: pointer; }
+.ow-submit { width: 100%; position: sticky; bottom: max(12px, env(safe-area-inset-bottom)); min-height: 56px; border: 0; border-radius: 15px; background: var(--green); color: #fff; font-size: 17px; font-weight: 800; box-shadow: 0 10px 24px #17634433; cursor: pointer; }
 .ow-submit:disabled { background: #8aa79a; box-shadow: none; cursor: default; }
 .ow-result { margin-top: 12vh; padding: 34px 22px; border-radius: 22px; background: #fff; border: 1px solid var(--line); text-align: center; display: grid; justify-items: center; gap: 12px; }
 .ow-result h1 { font-size: 23px; letter-spacing: -.04em; }
@@ -57,3 +57,78 @@ h1, p { margin: 0; }
 .ow-foot b { color: #46a06c; }
 .ow-foot small { width: 100%; text-align: center; font-size: 12px; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+/* ---------- 오퍼월 (포인트 받기 · 포인트 조회) ---------- */
+body { background: #fff; }
+.ow-back { display: inline-flex; align-items: center; gap: 4px; margin: 0 0 12px -4px; padding: 6px 8px; border-radius: 10px; color: var(--muted); font-size: 14px; font-weight: 700; text-decoration: none; }
+.ow-wall-head { padding: 4px 2px 0; color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .02em; }
+.ow-maintabs { position: sticky; top: 0; z-index: 3; display: grid; grid-template-columns: 1fr 1fr; margin: 8px -18px 0; padding: 0 18px; background: #fff; border-bottom: 1px solid #eef1ee; }
+.ow-maintabs button, .ow-subtabs button { border: 0; background: none; cursor: pointer; color: #9aa39f; font-weight: 800; }
+.ow-maintabs button { padding: 16px 0 14px; font-size: 19px; border-bottom: 3px solid transparent; letter-spacing: -.03em; }
+.ow-maintabs button.on { color: #111a17; border-color: #111a17; }
+.ow-subtabs { display: flex; gap: 4px; margin: 0 -18px; padding: 0 12px; overflow-x: auto; border-bottom: 1px solid #f0f2f0; scrollbar-width: none; }
+.ow-subtabs::-webkit-scrollbar { display: none; }
+.ow-subtabs button { flex: none; padding: 14px 10px 12px; font-size: 16px; border-bottom: 2.5px solid transparent; }
+.ow-subtabs button.on { color: #111a17; border-color: #111a17; }
+.ow-subtabs button:disabled { opacity: .45; cursor: default; }
+.ow-list { display: grid; gap: 2px; padding: 8px 0; }
+.ow-list.cards { gap: 14px; padding-top: 16px; }
+.ow-row { display: flex; align-items: center; gap: 14px; width: 100%; padding: 12px 0; border: 0; background: none; text-align: left; cursor: pointer; color: inherit; }
+.ow-row[aria-disabled="true"], .ow-card[aria-disabled="true"] { opacity: .6; }
+.ow-icon, .ow-letter { flex: none; width: 56px; height: 56px; border-radius: 16px; object-fit: cover; background: #f2f4f2; }
+.ow-icon.large, .ow-letter.large { width: 64px; height: 64px; border-radius: 18px; }
+.ow-letter { display: grid; place-items: center; color: #fff; font-size: 24px; font-weight: 850; }
+.ow-letter.t0 { background: #176344; } .ow-letter.t1 { background: #2f6fb0; } .ow-letter.t2 { background: #b7612a; }
+.ow-letter.t3 { background: #7b4fb3; } .ow-letter.t4 { background: #b2405e; } .ow-letter.t5 { background: #2f8f88; }
+.ow-row-text { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.ow-row-text b { font-size: 16px; font-weight: 800; letter-spacing: -.03em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ow-row-text small { color: #8a938f; font-size: 13.5px; display: flex; align-items: center; gap: 6px; }
+.ow-badge { padding: 2px 7px; border-radius: 7px; background: #fde9e7; color: #d2453a; font-size: 12px; font-style: normal; font-weight: 800; }
+.ow-pill { flex: none; min-width: 76px; padding: 9px 14px; border-radius: 99px; background: #e8f1fd; color: #1f4fae; font-size: 15px; font-weight: 850; text-align: center; }
+.ow-pill.done { background: #f0f2f1; color: #8a938f; }
+.ow-pill.wait { background: #fff2d9; color: #a26d08; }
+.ow-card { display: grid; width: 100%; padding: 0; border: 0; border-radius: 18px; overflow: hidden; background: #f6f7f6; text-align: left; cursor: pointer; color: inherit; }
+.ow-card img { width: 100%; aspect-ratio: 2 / 1; object-fit: cover; display: block; background: #eef1ee; }
+.ow-card-art { display: flex; align-items: center; gap: 12px; padding: 22px 18px 6px; color: var(--muted); font-size: 13px; font-weight: 700; }
+.ow-card-foot { display: flex; align-items: center; gap: 12px; padding: 14px 18px 16px; }
+.ow-empty { padding: 48px 8px; text-align: center; color: var(--muted); font-size: 14px; line-height: 1.6; }
+.ow-legal { margin-top: 18px; color: #9aa39f; font-size: 12px; line-height: 1.6; }
+.ow-summary { margin-top: 18px; padding: 20px; border-radius: 18px; background: linear-gradient(140deg, #12382a, #1d5b42); color: #e9f6df; display: grid; gap: 6px; }
+.ow-summary > span { font-size: 14px; font-weight: 700; opacity: .85; }
+.ow-summary strong { font-size: 34px; font-weight: 850; letter-spacing: -.03em; color: #fff; }
+.ow-summary strong small { margin-left: 3px; font-size: 18px; }
+.ow-summary div { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 6px; font-size: 13px; opacity: .9; }
+.ow-summary div b { color: var(--lime); }
+.ow-h2 { margin: 22px 0 6px; font-size: 16px; letter-spacing: -.03em; }
+.ow-history { display: grid; }
+.ow-history-row { display: flex; align-items: center; gap: 12px; padding: 13px 0; border-bottom: 1px solid #f0f2f0; }
+.ow-history-row span { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.ow-history-row b { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ow-history-row small { color: #8a938f; font-size: 12.5px; }
+.ow-history-row em { font-style: normal; font-weight: 850; color: #1f4fae; }
+.ow-history-row em.wait { color: #a26d08; }
+.ow-toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 20px); max-width: calc(100% - 36px); padding: 12px 16px; border-radius: 12px; background: #18231f; color: #fff; font-size: 14px; opacity: 0; transition: .2s; pointer-events: none; z-index: 9; }
+.ow-toast.on { opacity: 1; transform: translate(-50%, 0); }
+
+/* ---------- 광고 참여 화면 ---------- */
+.ow-banner { width: calc(100% + 36px); margin: -18px -18px 12px; aspect-ratio: 2 / 1; object-fit: cover; display: block; }
+.ow-head { display: flex; gap: 14px; align-items: flex-start; }
+.ow-head > div { min-width: 0; }
+.ow-steps { display: grid; gap: 10px; margin: 16px 0 0; padding: 0; list-style: none; }
+.ow-steps li { display: flex; gap: 12px; padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: #fff; }
+.ow-steps li > b { flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--deep); color: var(--lime); font-size: 13px; }
+.ow-steps li > div { flex: 1; min-width: 0; display: grid; gap: 6px; }
+.ow-steps strong { font-size: 15.5px; }
+.ow-steps p { color: var(--muted); font-size: 13.5px; line-height: 1.55; }
+.ow-steps em { flex: none; align-self: center; font-style: normal; font-weight: 850; color: #1f4fae; }
+.ow-steps li.done { background: #f2f8ef; border-color: #cfe5c4; }
+.ow-steps li.done > b { background: var(--green); color: #fff; }
+.ow-outline { display: inline-flex; align-items: center; justify-content: center; gap: 6px; margin-top: 4px; padding: 12px; border: 1.5px solid var(--green); border-radius: 12px; color: var(--green); font-weight: 800; text-decoration: none; }
+.ow-input { width: 100%; margin-top: 4px; padding: 13px 14px; border: 1.5px solid var(--line); border-radius: 12px; font-size: 16px; }
+.ow-input:focus { border-color: var(--green); outline: none; }
+.ow-file { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 4px; padding: 14px; border: 1.5px dashed #b7cbbd; border-radius: 12px; color: var(--green); font-weight: 750; cursor: pointer; overflow-wrap: anywhere; }
+.ow-steps-note { display: flex; gap: 8px; align-items: flex-start; margin: 16px 0 14px; padding: 12px 14px; border-radius: 12px; background: #f2f6f2; color: #45574f; font-size: 13.5px; line-height: 1.55; }
+.ow-steps-note svg { margin-top: 2px; color: var(--green); }
+.ow-hint.left { text-align: left; margin-top: 10px; }
+a.ow-submit { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 0 18px; text-decoration: none; position: static; margin-top: 6px; width: 100%; }
+.ow-result a.ow-submit { min-height: 52px; }

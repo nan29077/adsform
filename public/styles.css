@@ -871,3 +871,47 @@ dialog.wide { max-width: min(calc(100% - 26px),880px); }
 .toolbar > .actions { margin: 0 0 12px auto; }
 .toolbar > .actions .btn svg { width: 15px; height: 15px; margin-right: 4px; }
 .order-grid + .dash-block { margin-top: 12px; }
+
+/* ---------- 오퍼월 광고 (광고 계정 · 관리자) ---------- */
+.ow-offer-head { display: flex; gap: 12px; align-items: flex-start; margin-top: 6px; }
+.ow-offer-head h3 { margin: 0; }
+.ow-offer-head p { margin-top: 3px; }
+.ow-sub-line { color: var(--muted); font-size: 12px; }
+.ow-sub-line b { color: #d2453a; }
+.ow-thumb { flex: none; width: 48px; height: 48px; border-radius: 13px; object-fit: cover; background: #eef3ee; }
+.ow-thumb.letter { display: grid; place-items: center; background: #176344; color: #fff; font-weight: 850; font-size: 20px; }
+.ow-proof { display: block; max-width: 100%; max-height: 320px; margin: 8px 0; border-radius: 12px; border: 1px solid var(--line); }
+.ow-pb { display: grid; gap: 2px; margin-bottom: 6px; }
+.ow-pb form { margin-top: 2px; }
+.ow-rate-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 8px; }
+.ow-intro-panel { display: flex; gap: 14px; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.ow-intro-panel h2 { margin-bottom: 4px; }
+.ow-intro-panel p { color: var(--muted); font-size: 13px; line-height: 1.6; max-width: 720px; }
+.ow-intro-panel .actions { margin: 0; flex: none; }
+.ow-type-guide { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; margin-bottom: 12px; }
+.ow-type-guide div, .ow-type-picker label { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--line); border-radius: 14px; background: #fff; }
+.ow-type-guide b, .ow-type-picker b { font-size: 14px; }
+.ow-type-guide span, .ow-type-picker small { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.ow-type-guide em, .ow-type-picker em { font-style: normal; font-weight: 800; color: var(--green); font-size: 12px; }
+.ow-type-picker { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 8px; }
+.ow-type-picker label { position: relative; cursor: pointer; padding-left: 36px; }
+.ow-type-picker input { position: absolute; left: 12px; top: 14px; accent-color: var(--green); }
+.ow-type-picker label:has(input:checked) { border-color: var(--green); background: #f1f8ee; }
+.ow-images { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }
+.ow-image { display: flex; gap: 10px; align-items: center; padding: 10px; border: 1px dashed #c9d8cc; border-radius: 12px; }
+.ow-image > div { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ow-image small { width: 100%; color: var(--muted); }
+.ow-image-preview { flex: none; display: grid; place-items: center; width: 56px; height: 56px; border-radius: 12px; background: #eef3ee; color: var(--muted); font-size: 11px; overflow: hidden; }
+.ow-image-preview.banner { width: 96px; height: 48px; }
+.ow-image-preview img { width: 100%; height: 100%; object-fit: cover; }
+.ow-group { margin: 0; padding: 0; border: 0; display: grid; gap: 8px; min-width: 0; }
+.ow-steps-edit { display: grid; gap: 8px; }
+.ow-step-row { display: grid; grid-template-columns: minmax(0,1.4fr) minmax(0,1fr) minmax(0,.8fr); gap: 8px; }
+.ow-estimate .quote-balance { margin: 0; }
+@media (max-width: 760px) {
+  .ow-type-picker, .ow-rate-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .ow-images { grid-template-columns: minmax(0,1fr); }
+  .ow-intro-panel { flex-direction: column; align-items: stretch; }
+  .ow-step-row { grid-template-columns: minmax(0,1fr) minmax(0,1fr); }
+  .ow-step-row > :first-child { grid-column: 1/-1; }
+}
