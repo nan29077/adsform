@@ -77,13 +77,13 @@ function renderWall() {
       <span class="ow-card-foot"><span class="ow-row-text"><b>${esc(item.title)}</b><small>${item.badge ? `<em class="ow-badge">${esc(item.badge)}</em>` : ''}${esc(item.action)}</small></span>${pill(item, unit)}</span></button>`;
   const earn = `<nav class="ow-subtabs" aria-label="미션 종류">${wallTabs.map(([key, label]) => `<button type="button" data-category="${key}" class="${key === wallView.category ? 'on' : ''}"${counts[key] ? '' : ' disabled'}>${label}</button>`).join('')}</nav>
     <section class="ow-list ${wallView.category === 'visit' ? 'cards' : ''}">${items.length ? items.map(wallView.category === 'visit' ? card : row).join('') : '<p class="ow-empty">지금 참여할 수 있는 미션이 없어요. 내일 다시 확인해 주세요.</p>'}</section>
-    <p class="ow-legal">리워드는 ${esc(network.name)}에서 지급합니다. 방문·콘텐츠 미션은 하루 한 번, 나머지는 미션별로 한 번 참여할 수 있어요.</p>`;
+    <p class="ow-legal">${preview ? '미리보기에서는 리워드가 지급되지 않아요.' : `리워드는 ${esc(network.name)}에서 지급합니다.`} ${offers.some(item => item.repeat === 'daily') ? '매일 미션은 하루 한 번, 나머지는 미션별로 한 번 참여할 수 있어요.' : '미션별로 한 번 참여할 수 있어요.'}</p>`;
   const historyRow = (item, waiting) => `<div class="ow-history-row"><span><b>${esc(item.title)}</b><small>${when(item.created)} · ${typeName[item.type]}${waiting ? ' · 검수 중' : `${item.step && item.step !== 'done' ? ' 단계' : ''} · ${item.postback === 'sent' ? '지급 요청 완료' : '지급 요청 중'}`}</small></span><em class="${waiting ? 'wait' : ''}">+${format(item.reward)}${esc(unit)}</em></div>`;
   const check = `<section class="ow-summary"><span>애즈폼 미션으로 받은 리워드</span><strong>${format(totals.earned)}<small>${esc(unit)}</small></strong>
       <div><span>이번 달 <b>${format(totals.month || 0)}${esc(unit)}</b></span><span>적립 예정 <b>${format(totals.pending)}${esc(unit)}</b></span><span>참여 <b>${format(totals.count)}회</b></span></div></section>
     ${data.pending?.length ? `<h2 class="ow-h2">적립 예정</h2><section class="ow-history">${data.pending.map(item => historyRow(item, true)).join('')}</section>` : ''}
     <h2 class="ow-h2">적립 내역</h2><section class="ow-history">${history.length ? history.map(item => historyRow(item, false)).join('') : '<p class="ow-empty">아직 받은 리워드가 없어요. 포인트 받기에서 미션에 참여해 보세요.</p>'}</section>
-    <p class="ow-legal">실제 지급과 잔액은 ${esc(network.name)} 앱에서 확인할 수 있어요. 지급 요청 후 반영까지 몇 분 걸릴 수 있습니다.</p>`;
+    <p class="ow-legal">${preview ? '미리보기에는 적립 내역이 없어요.' : `실제 지급과 잔액은 ${esc(network.name)} 앱에서 확인할 수 있어요. 지급 요청 후 반영까지 몇 분 걸릴 수 있습니다.`}</p>`;
   root.innerHTML = `${preview ? '<p class="ow-preview">관리자 미리보기 · 진행 중인 전체 광고</p>' : ''}
     <header class="ow-wall-head"><span>${esc(network.name)} × adsform</span></header>
     <nav class="ow-maintabs" aria-label="오퍼월">${[['earn', '포인트 받기'], ['check', '포인트 조회']].map(([key, label]) => `<button type="button" data-main="${key}" class="${wallView.main === key ? 'on' : ''}">${label}</button>`).join('')}</nav>
@@ -249,7 +249,7 @@ function bind() {
   const { offer } = data;
   const visit = root.querySelector('[data-visit]');
   if (visit) {
-    dwell(visit, `방문하고 ${format(offer.reward)}${offer.unit} 받기`);
+    dwell(visit, `${offer.type === 'content' ? '콘텐츠 보고' : '방문하고'} ${format(offer.reward)}${offer.unit} 받기`);
     visit.addEventListener('click', async () => {
       const outcome = await send(visit, {});
       if (!outcome) return;

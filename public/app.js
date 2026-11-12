@@ -34,7 +34,7 @@ const icon = name => `<svg width="22" height="22" viewBox="0 0 24 24" fill="none
 const roleName = { admin: '최고관리자', operator: '실행사', agency: '대행사', advertiser: '광고주', participant: '참여자' };
 const kinds = { quiz: '브랜드 퀴즈', survey: '설문 조사' };
 const statuses = { pending: '심사 대기', active: '진행 중', upcoming: '시작 예정', settling: '검수 후 정산', paused: '일시중지', closed: '종료', approved: '승인', rejected: '반려', canceled: '취소', suspended: '이용 정지', withdrawn: '탈퇴' };
-const ledgerNames = { opening: '테스트 잔액', charge: '충전 승인', reserve: '광고 예산 배정', release: '미집행 예산 반환', commission: '대행사 충전 수익', mission: '미션 보상', payout: '출금 신청', payout_return: '출금 반환', adjust: '운영 조정' };
+const ledgerNames = { opening: '테스트 잔액', charge: '충전 승인', reserve: '광고 예산 배정', release: '미집행 예산 반환', commission: '대행사 충전 수익', mission: '미션 보상', payout: '출금 신청', payout_return: '출금 반환', adjust: '운영 조정', ow_reserve: '오퍼월 예산 배정', ow_release: '오퍼월 미집행 반환' };
 const isBusiness = user => ['advertiser', 'agency', 'operator'].includes(user?.role);
 const backgrounds = {
   grove: '봄날의 골목 상점', tide: '바닷가 카페', lilac: '라일락 책방', sunset: '노을빛 마켓', night: '저녁의 꽃가게',
@@ -156,7 +156,7 @@ function nav() {
   $('#header').innerHTML = `<a class="logo" href="/" aria-label="애즈폼 홈">${brandMark}${wordmark}<span class="logo-ko">애즈폼</span></a>
     <div class="header-actions"><button type="button" class="icon-btn" data-guide aria-label="이용 안내">${icon('help')}</button>
     ${bellButton()}
-    <a href="${user ? '/manage' : '/login'}" class="login-link">${user ? profileAvatar(user, 'avatar-small') + esc(roleName[user.role]) : '로그인'}${icon('chevron')}</a></div>`;
+    <a href="${user ? '/manage' : '/login'}" class="login-link${user ? ' signed-in' : ''}"${user ? ` aria-label="${esc(roleName[user.role])} 대시보드"` : ''}>${user ? profileAvatar(user, 'avatar-small') + `<span class="login-role">${esc(roleName[user.role])}</span>` : '로그인'}${icon('chevron')}</a></div>`;
   const participant = user?.role === 'participant';
   const links = [
     ['/', 'home', '홈'], ['/missions', 'target', '참여'],
@@ -1663,7 +1663,15 @@ document.addEventListener('click', event => {
       'payout/decision:approve': '계좌로 지급을 마친 경우에만 지급 완료로 처리하세요.',
       'payout/decision:reject': '반려하면 신청 금액이 신청자에게 돌아갑니다. 사유는 신청자에게 표시됩니다.',
       'payout/cancel:cancel': '출금 신청을 취소하고 금액을 돌려받습니다.',
-      'mission/review:reject': '반려 사유는 참여자의 참여 내역에 표시됩니다.'
+      'mission/review:reject': '반려 사유는 참여자의 참여 내역에 표시됩니다.',
+      'offerwall/offer/status:approve': '승인하면 시작일부터 연동된 모든 매체에 광고를 공급합니다.',
+      'offerwall/offer/status:reject': '반려하면 배정된 예산을 모두 광고 계정 잔액으로 돌려드립니다. 반려 사유는 광고 계정에 알림으로 전달돼요.',
+      'offerwall/offer/status:cancel': '심사 전 광고를 취소하고 배정된 예산을 모두 잔액으로 돌려드립니다.',
+      'offerwall/offer/status:pause': '매체 오퍼월에서 광고가 내려갑니다. 이미 참여 중인 회원의 제출과 미션형 전환은 계속 받습니다.',
+      'offerwall/offer/status:activate': '광고를 다시 매체 오퍼월에 공급합니다.',
+      'offerwall/offer/status:close': '광고를 종료하고 완료 건 기준으로 남은 예산을 잔액으로 돌려드립니다. 종료 후에는 다시 열 수 없고, 검수 중인 참여가 있으면 종료할 수 없어요.',
+      'offerwall/click/review:approve': '승인하면 광고 예산에서 집행하고 매체에 리워드 지급(포스트백)을 요청합니다. 되돌릴 수 없어요.',
+      'offerwall/click/review:reject': '반려하면 리워드가 지급되지 않고 매체 회원의 참여 화면에 사유가 표시됩니다.'
     }[`${d.decision}:${d.action}`];
     modal('ADSFORM', label + ' 확인', `<p>${explanation || `선택한 항목을 ${label} 처리합니다.`}</p>
       <form data-form="${esc(d.decision)}" class="form"><input type="hidden" name="id" value="${esc(d.id)}"><input type="hidden" name="action" value="${esc(d.action)}">

@@ -42,7 +42,7 @@ export const snsTypes = {
   etc: { label: '기타 SNS', action: '팔로우하면', hosts: null }
 };
 export const actionText = offer => offer.type === 'follow' ? (snsTypes[offer.sns]?.action || '팔로우하면')
-  : { visit: '페이지 방문하면', content: '페이지 방문하면', quiz: '퀴즈 맞히면', survey: '설문 참여하면', cpa: '미션 완료하면' }[offer.type];
+  : { visit: '페이지 방문하면', content: '콘텐츠 보면', quiz: '퀴즈 맞히면', survey: '설문 참여하면', cpa: '미션 완료하면' }[offer.type];
 
 const macros = ['click_id', 'user_id', 'offer_id', 'offer_type', 'event', 'transaction_id', 'price', 'reward', 'timestamp', 'signature'];
 const idPattern = /^[A-Za-z0-9._:~=+/-]{1,256}$/;
@@ -636,15 +636,21 @@ export function setupOfferwall(ctx) {
     return true;
   }
 
+  const goalReason = '목표 달성 · 검수 후 종료';
   function closeIfDone(offer) {
     const fresh = get('SELECT * FROM ow_offers WHERE id=?', offer.id);
-    if (fresh.status !== 'active') return;
+    // 일시중지 중에도 미션형 전환·검수 승인으로 예산이 바닥날 수 있어 함께 정리합니다.
+    if (!['active', 'paused'].includes(fresh.status)) return;
     const used = get("SELECT COUNT(*) AS total FROM ow_clicks WHERE offer_id=? AND status IN ('completed','pending')", offer.id).total;
+    const pending = get("SELECT 1 FROM ow_clicks WHERE offer_id=? AND status='pending'", offer.id);
     const budgetLeft = fresh.owner_id ? fresh.budget - spentOf(fresh.id) : Infinity;
     const minUnit = fresh.type === 'cpa' ? Math.min(...JSON.parse(fresh.steps).map(step => step.cost)) : fresh.cost;
-    if (used >= fresh.goal && !get("SELECT 1 FROM ow_clicks WHERE offer_id=? AND status='pending'", offer.id) && fresh.type !== 'cpa') finish(fresh, 'closed', '목표 달성');
-    else if (fresh.owner_id && budgetLeft < minUnit) finish(fresh, 'closed', '예산 소진');
-    else if (used >= fresh.goal && fresh.type !== 'cpa') run("UPDATE ow_offers SET reason='목표 달성 · 검수 후 종료' WHERE id=?", fresh.id);
+    if (fresh.owner_id && budgetLeft < minUnit) return finish(fresh, 'closed', '예산 소진');
+    if (fresh.status !== 'active' || fresh.type === 'cpa') return;
+    if (used >= fresh.goal && !pending) finish(fresh, 'closed', '목표 달성');
+    else if (used >= fresh.goal) run('UPDATE ow_offers SET reason=? WHERE id=?', goalReason, fresh.id);
+    // 검수에서 반려돼 다시 자리가 생기면 '검수 후 종료' 안내를 지웁니다.
+    else if (fresh.reason === goalReason) run("UPDATE ow_offers SET reason='' WHERE id=?", fresh.id);
   }
 
   function postbackRequest(network, values) {

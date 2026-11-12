@@ -336,6 +336,52 @@ test('미션형(CPA): 전환 비밀키, 서명된 단계 통보, 중복·위조 
   }
 });
 
+test('설문 검수 반려 시 다시 모집, 일시중지 중 미션형 예산 소진 시 종료', { timeout: 60000 }, async () => {
+  const sink = await receiver();
+  const app = await start();
+  try {
+    const { call, post } = app;
+    const admin = await app.login('admin');
+    const advertiser = await app.login('advertiser');
+    const net = await network(app, admin, sink);
+    const base = { brand: '오후의 상점', intro: '소개', start: today(), end: '2099-12-31', min_dwell: '0' };
+    const survey = await post('offerwall/offer', advertiser, { ...base, type: 'survey', title: '매장 설문', goal: '1', review: 'on', q1_prompt: '좋았던 점은?', key: 's1' });
+    await post('offerwall/offer/status', admin, { id: survey.id, action: 'approve' });
+    const first = await call(landUrl(net, survey.slug, 'sv-1', 'm-1'), { expected: 303 });
+    assert.equal((await call(`/ow/${survey.slug}/submit`, { cookie: first.cookie, body: { answers: ['친절하고 깨끗해요'] } })).data.status, 'pending');
+    const mine = async () => (await call('/api/offerwall/mine', { cookie: advertiser })).data.offers.find(offer => offer.id === survey.id);
+    assert.equal((await mine()).reason, '목표 달성 · 검수 후 종료');
+    assert.match((await call(landUrl(net, survey.slug, 'sv-2', 'm-2'), { expected: 303 })).response.headers.get('location'), /r=full/);
+    const pending = (await call('/api/offerwall?status=pending', { cookie: admin })).data.clicks[0];
+    await post('offerwall/click/review', admin, { id: pending.id, action: 'reject', reason: '성의 없는 답변' });
+    const reopened = await mine();
+    assert.equal(reopened.status, 'active');
+    assert.equal(reopened.reason, '', '반려로 자리가 생기면 검수 후 종료 안내를 지움');
+    assert.equal((await call(landUrl(net, survey.slug, 'sv-3', 'm-3'), { expected: 303 })).response.headers.get('location'), `/ow/${survey.slug}`);
+
+    // 미션형: 일시중지 중 마지막 단계 전환으로 예산을 다 쓰면 종료하고 정산
+    const cpa = await post('offerwall/offer', advertiser, { ...base, type: 'cpa', title: '앱 가입', goal: '1', target_url: 'https://example.com/app', s1_label: '가입', s1_code: 'signup', s1_cost: '300', key: 'c1' });
+    await post('offerwall/offer/status', admin, { id: cpa.id, action: 'approve' });
+    const land = await call(landUrl(net, cpa.slug, 'cp-1', 'm-1'), { expected: 303 });
+    const ref = new URL((await call(`/ow/${cpa.slug}/submit`, { cookie: land.cookie, body: {} })).data.url).searchParams.get('adsform_click');
+    await post('offerwall/offer/status', advertiser, { id: cpa.id, action: 'pause' });
+    const body = JSON.stringify({ click: ref, event: 'signup' });
+    const ts = now();
+    await call('/ow/v1/conversions', { raw: body, headers: { 'X-Adsform-Offer': cpa.slug, 'X-Adsform-Timestamp': String(ts),
+      'X-Adsform-Signature': hmac(cpa.convSecret, `${ts}\nPOST\n/ow/v1/conversions\n${createHash('sha256').update(body).digest('hex')}`) } });
+    const closed = (await call('/api/offerwall/mine', { cookie: advertiser })).data.offers.find(offer => offer.id === cpa.id);
+    assert.equal(closed.status, 'closed');
+    assert.equal(closed.reason, '예산 소진');
+
+    // 잔액 내역에 오퍼월 예산 배정·반환이 광고 제목과 함께 표시
+    const ledger = (await call('/api/state', { cookie: advertiser })).data.ledger;
+    assert.ok(ledger.some(row => row.kind === 'ow_reserve' && row.memo === '오퍼월 · 매장 설문'));
+  } finally {
+    sink.close();
+    await app.stop();
+  }
+});
+
 test('X-Forwarded-For는 프록시가 덧붙인 마지막 주소를 씁니다', { timeout: 20000 }, async () => {
   const app = await start({ ADSFORM_TRUST_PROXY: '1' });
   try {
