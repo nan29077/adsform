@@ -99,8 +99,13 @@ test('광고 계정 등록 → 예산 배정 → 심사 승인 → 서명 피드
     const net = await network(app, admin, sink);
     assert.match(net.secret, /^aws_/);
     assert.equal(readFileSync(join(app.dir, 'secret.key'), 'utf8').trim().length, 64);
-    const stored = app.db$().prepare("SELECT secret_enc FROM ow_networks WHERE code='testnet'").get().secret_enc;
-    assert.ok(stored.startsWith('v1:') && !stored.includes(net.secret), '비밀키는 암호화해 저장');
+    const inspectionDb = app.db$();
+    try {
+      const stored = inspectionDb.prepare("SELECT secret_enc FROM ow_networks WHERE code='testnet'").get().secret_enc;
+      assert.ok(stored.startsWith('v1:') && !stored.includes(net.secret), '비밀키는 암호화해 저장');
+    } finally {
+      inspectionDb.close();
+    }
     assert.ok(!JSON.stringify((await call('/api/offerwall', { cookie: admin })).data).includes(net.secret));
 
     // 광고 등록: 단가 × 목표만큼 예산 배정, 참여자 계정은 등록 불가
