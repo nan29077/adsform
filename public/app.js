@@ -1,4 +1,5 @@
 import { setupOfferwallConsole } from './offerwall-console.js';
+import { setupShortformConsole } from './shortform-console.js';
 
 const icons = {
   home: '<path d="m3 10 9-7 9 7v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 21v-7h6v7"/>',
@@ -28,13 +29,18 @@ const icons = {
   search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
   wallet: '<path d="M4 7a2 2 0 0 1 2-2h12v4"/><rect x="3" y="9" width="18" height="11" rx="2"/><path d="M16 14.5h.01"/>',
   history: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5m4-1v5l3 2"/>',
-  download: '<path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/>'
+  download: '<path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/>',
+  video: '<rect x="3" y="6" width="13" height="12" rx="2.5"/><path d="m16 10.5 5-3v9l-5-3"/>',
+  phone: '<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/>'
 };
 const icon = name => `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name]}</svg>`;
-const roleName = { admin: '최고관리자', operator: '실행사', agency: '대행사', advertiser: '광고주', participant: '참여자' };
+// 부업회원 명칭은 관리자가 바꿀 수 있어 서버 상태(sfLabel)를 받을 때마다 갱신합니다.
+const roleName = { admin: '최고관리자', operator: '실행사', agency: '대행사', advertiser: '광고주', participant: '참여자', creator: '부업회원' };
 const kinds = { quiz: '브랜드 퀴즈', survey: '설문 조사' };
 const statuses = { pending: '심사 대기', active: '진행 중', upcoming: '시작 예정', settling: '검수 후 정산', paused: '일시중지', closed: '종료', approved: '승인', rejected: '반려', canceled: '취소', suspended: '이용 정지', withdrawn: '탈퇴' };
-const ledgerNames = { opening: '테스트 잔액', charge: '충전 승인', reserve: '광고 예산 배정', release: '미집행 예산 반환', commission: '대행사 충전 수익', mission: '미션 보상', payout: '출금 신청', payout_return: '출금 반환', adjust: '운영 조정', ow_reserve: '오퍼월 예산 배정', ow_release: '오퍼월 미집행 반환' };
+const ledgerNames = { opening: '테스트 잔액', charge: '충전 승인', reserve: '광고 예산 배정', release: '미집행 예산 반환', commission: '대행사 충전 수익', mission: '미션 보상', payout: '출금 신청', payout_return: '출금 반환', adjust: '운영 조정', ow_reserve: '오퍼월 예산 배정', ow_release: '오퍼월 미집행 반환',
+  sf_reserve: '숏폼 예산 배정', sf_extra: '숏폼 증액', sf_release: '숏폼 미집행 반환', sf_refund: '숏폼 환급', sf_pay: '숏폼 배포 수익' };
+const isCreator = user => user?.role === 'creator';
 const isBusiness = user => ['advertiser', 'agency', 'operator'].includes(user?.role);
 const backgrounds = {
   grove: '봄날의 골목 상점', tide: '바닷가 카페', lilac: '라일락 책방', sunset: '노을빛 마켓', night: '저녁의 꽃가게',
@@ -47,6 +53,8 @@ const avatarFileTypes = ['image/jpeg', 'image/png', 'image/webp'];
 const brandMark = '<img class="mark" src="/icon.svg?v=2" alt="" width="64" height="64">';
 const wordmark = '<strong>adsform<span>.</span></strong>';
 const banners = [
+  { name: 'shortform', label: 'SHORT-FORM DISTRIBUTION', title: '숏폼 한 편이,\n실제 계정을 타고 퍼져요.', text: '부업회원이 직접 만들어 유튜브·인스타·틱톡·페이스북에 배포해요.', cta: '숏폼 배포 시작하기', action: '/manage?tab=sfads' },
+  { name: 'creator', label: 'SIDE JOB', title: '내 SNS 계정으로\n숏폼 부업 시작.', text: '캠페인 가이드대로 만들어 올리면 건당 수익이 정산돼요.', cta: '부업회원 가입하기', action: '/signup?role=creator' },
   { name: 'quiz', label: 'TODAY’S MISSION', title: '가볍게 풀고,\n기분 좋게 적립.', text: '오늘의 브랜드 퀴즈를 만나보세요.', cta: '퀴즈 보러 가기', action: '/missions?kind=quiz' },
   { name: 'survey', label: 'YOUR VOICE', title: '당신의 생각이\n브랜드를 바꿔요.', text: '짧은 설문에 참여하고 포인트를 받아요.', cta: '설문 둘러보기', action: '/missions?kind=survey' },
   { name: 'partner', label: 'FOR BRANDS', title: '새로운 고객과\n만나는 첫걸음.', text: '브랜드 퀴즈와 설문을 직접 만들어 보세요.', cta: '광고 주문하기', action: '/manage?tab=new' }
@@ -92,6 +100,7 @@ async function api(path, body) {
   });
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || '요청에 실패했습니다.');
+  if (path === '/api/state' && data.sfLabel) roleName.creator = data.sfLabel;
   return data;
 }
 
@@ -158,9 +167,10 @@ function nav() {
     ${bellButton()}
     <a href="${user ? '/manage' : '/login'}" class="login-link${user ? ' signed-in' : ''}"${user ? ` aria-label="${esc(roleName[user.role])} 대시보드"` : ''}>${user ? profileAvatar(user, 'avatar-small') + `<span class="login-role">${esc(roleName[user.role])}</span>` : '로그인'}${icon('chevron')}</a></div>`;
   const participant = user?.role === 'participant';
+  const creator = isCreator(user);
   const links = [
-    ['/', 'home', '홈'], ['/missions', 'target', '참여'],
-    [participant ? '/manage?tab=rewards' : user ? '/manage' : '/login', participant ? 'gift' : 'bag', participant ? '보상' : user ? '대시보드' : '광고 관리'],
+    ['/', 'home', '홈'], creator ? ['/manage?tab=sfjobs', 'video', '캠페인'] : ['/missions', 'target', '참여'],
+    creator ? ['/manage?tab=sfearn', 'wallet', '수익'] : [participant ? '/manage?tab=rewards' : user ? '/manage' : '/login', participant ? 'gift' : 'bag', participant ? '보상' : user ? '대시보드' : '광고 관리'],
     ['/#guide', 'book', '이용방법', true], ['/#faq', 'help', 'FAQ'],
     [user ? '/manage?tab=profile' : '/login', 'user', '내 정보']
   ];
@@ -260,12 +270,13 @@ function home() {
     <div class="home-brand-line">${brandMark}<div><strong>${slogan}</strong><small>브랜드 퀴즈와 설문으로 만나는 일상의 보상</small></div></div>
     <div class="quick-grid" aria-label="빠른 메뉴">
       ${[
+        [isCreator(state.user) ? '/manage?tab=sfjobs' : business ? '/manage?tab=sfads' : state.user?.role === 'admin' ? '/manage?tab=shortform' : '/#shortform', 'video', '숏폼 배포', 'peach'],
         ['/missions?kind=quiz', 'star', '퀴즈', 'mint'],
         ['/missions?kind=survey', 'survey', '설문', 'violet'],
-        state.user && !participant ? ['/manage', 'grid', '대시보드', 'peach'] : [rewardsUrl, 'gift', '내 보상', 'peach'],
-        state.user?.role === 'participant' || state.user?.role === 'admin' ? ['/#faq', 'help', 'FAQ', 'yellow'] : ['/manage?tab=new', 'bag', '광고 주문', 'yellow']
+        state.user && !participant ? ['/manage', 'grid', '대시보드', 'yellow'] : [rewardsUrl, 'gift', '내 보상', 'yellow']
       ].map(([href, name, text, tone]) => `<a href="${href}"><span class="quick-icon ${tone}">${icon(name)}</span>${text}</a>`).join('')}
     </div>
+    ${shortformSection(business)}
     <section class="home-missions home-section">
       <div class="section-head"><div><span class="eyebrow"><i></i> THE OFFERWALL</span><h2>오늘의 추천 미션</h2></div><a href="/missions">전체보기 ${icon('chevron')}</a></div>
       <p class="home-description">보상과 조건을 확인하고 마음에 드는 미션부터 시작해 보세요.</p>
@@ -317,6 +328,24 @@ function home() {
   </div>`;
 }
 
+const sfPlatforms = [['youtube', '유튜브 쇼츠'], ['instagram', '인스타그램 릴스'], ['facebook', '페이스북 릴스'], ['tiktok', '틱톡']];
+function shortformSection(business) {
+  const creator = isCreator(state.user);
+  const name = roleName.creator;
+  return `<section class="home-section sf-home" id="shortform" tabindex="-1">
+    <div class="sf-home-main"><span class="eyebrow"><i></i> MAIN · SHORT-FORM DISTRIBUTION</span><h2>숏폼, 만드는 사람과<br>퍼뜨리는 계정을 한 번에</h2>
+      <p>광고 계정이 캠페인을 등록하면 ${esc(name)}이 가이드대로 숏폼을 만들어 <b>자기 SNS 계정</b>에 올립니다. 운영팀이 게시물을 검수해 승인한 건만 집행돼요.</p>
+      <ul class="sf-home-platforms">${sfPlatforms.map(([key, text]) => `<li><span class="sf-chip ${key}">${text}</span></li>`).join('')}</ul>
+      <div class="actions">${creator ? `<a class="btn primary" href="/manage?tab=sfjobs">참여할 캠페인 보기 ${icon('arrow')}</a>`
+        : `<a class="btn primary" href="${business || !state.user ? '/manage?tab=sfads' : state.user.role === 'admin' ? '/manage?tab=shortform' : '/signup?role=advertiser'}">숏폼 배포 맡기기 ${icon('arrow')}</a>
+           ${state.user ? '' : `<a class="btn quiet" href="/signup?role=creator">${esc(name)}으로 부업하기</a>`}`}</div></div>
+    <div class="sf-home-flow"><div><span class="eyebrow">FOR BRANDS</span><ol>${[['캠페인 등록', '플랫폼별 배포 건수를 정하고 예산 배정'], ['운영팀 심사', '가이드·소재 확인 후 모집 시작'], [`${name} 제작·게시`, '인증된 실제 계정에 숏폼 업로드'], ['검수·리포트', '승인 건만 집행 · 게시물·조회수 확인']]
+        .map(([title, text], i) => `<li><span>${i + 1}</span><b>${title}</b><small>${text}</small></li>`).join('')}</ol></div>
+      <div><span class="eyebrow">FOR ${esc(name.toUpperCase())}</span><ol>${[['가입·승인', '활동 소개를 남기면 운영팀이 확인'], ['SNS 채널 인증', '프로필에 인증 코드를 넣어 본인 확인'], ['캠페인 참여', '가이드대로 만들고 내 계정에 게시'], ['정산·출금', '승인 후 보류 기간이 지나면 수익 정산']]
+        .map(([title, text], i) => `<li><span>${i + 1}</span><b>${title}</b><small>${text}</small></li>`).join('')}</ol></div></div>
+  </section>`;
+}
+
 function missions(params) {
   const kind = params.get('kind');
   const rank = m => m.reservedUntil ? 0 : !m.mine && m.remaining > 0 ? 1 : m.mine ? 3 : 2;
@@ -329,7 +358,7 @@ function missions(params) {
 
 function login(params) {
   const next = params.get('next');
-  const demoRoles = [['participant', 'gift'], ['advertiser', 'bag'], ['agency', 'people'], ['operator', 'grid'], ['admin', 'lock']];
+  const demoRoles = [['creator', 'video'], ['participant', 'gift'], ['advertiser', 'bag'], ['agency', 'people'], ['operator', 'grid'], ['admin', 'lock']];
   const current = state.user ? `<p class="notice">현재 ${esc(state.user.name)}(${roleName[state.user.role]}) 계정으로 로그인되어 있어요. <a href="/manage">대시보드로 가기</a></p>` : '';
   return `<div class="content login-page">${pageHead('WELCOME TO ADSFORM', '애즈폼에 오신 것을<br>환영해요', '계정으로 로그인하고 미션과 광고를 관리하세요.')}
     ${current}
@@ -344,13 +373,17 @@ function login(params) {
 }
 
 function signup(params) {
-  const chosen = params.get('role') === 'advertiser' || params.get('next') === 'order' ? 'advertiser' : 'participant';
-  return `<div class="content login-page">${pageHead('JOIN ADSFORM', '애즈폼 회원가입', '참여자는 미션으로 포인트를, 광고주는 캠페인으로 고객의 생각을 만나요.')}
+  const chosen = params.get('role') === 'creator' ? 'creator' : params.get('role') === 'advertiser' || params.get('next') === 'order' ? 'advertiser' : 'participant';
+  return `<div class="content login-page">${pageHead('JOIN ADSFORM', '애즈폼 회원가입', `${esc(roleName.creator)}은 숏폼 배포로 수익을, 광고주는 캠페인으로 고객을, 참여자는 미션으로 포인트를 만나요.`)}
     <form data-form="signup" class="form panel">
       <fieldset class="role-picker"><legend>가입 유형</legend>
-        ${[['participant', 'gift', '참여자', '미션에 참여하고 포인트를 모아요'], ['advertiser', 'bag', '광고주', '퀴즈·설문 캠페인을 주문해요']].map(([key, glyph, title, text]) =>
-          `<label class="product-option"><input type="radio" name="role" value="${key}"${key === chosen ? ' checked' : ''}><span class="mission-icon ${key === 'participant' ? 'quiz' : 'survey'}">${icon(glyph)}</span><span class="product-copy"><b>${title}</b><small>${text}</small></span></label>`).join('')}
+        ${[['creator', 'video', roleName.creator, '내 SNS에 숏폼을 올리고 수익을 받아요'], ['advertiser', 'bag', '광고주', '숏폼 배포·퀴즈·설문 캠페인을 맡겨요'], ['participant', 'gift', '참여자', '미션에 참여하고 포인트를 모아요']].map(([key, glyph, title, text]) =>
+          `<label class="product-option"><input type="radio" name="role" value="${key}"${key === chosen ? ' checked' : ''}><span class="mission-icon ${key === 'participant' ? 'quiz' : key === 'creator' ? 'creator' : 'survey'}">${icon(glyph)}</span><span class="product-copy"><b>${esc(title)}</b><small>${text}</small></span></label>`).join('')}
       </fieldset>
+      <fieldset class="creator-fields" data-role-for="creator"${chosen === 'creator' ? '' : ' hidden disabled'}><legend>${esc(roleName.creator)} 신청 정보</legend>
+        ${select('주로 활동하는 SNS', 'main_platform', sfPlatforms)}
+        ${textarea('활동 소개', 'intro', 'required minlength="10" maxlength="500" rows="3" placeholder="운영 중인 채널, 주로 올리는 콘텐츠, 게시 주기 등을 적어 주세요."')}
+        <p class="form-hint">운영팀이 확인한 뒤 승인해요. 가입 후 SNS 채널을 등록하고 인증 코드를 프로필에 넣으면 캠페인에 참여할 수 있어요.</p></fieldset>
       ${field('이름 또는 상호', 'name', 'text', 'required maxlength="60" autocomplete="name"')}
       ${field('아이디', 'username', 'text', 'required minlength="4" maxlength="32" pattern="[a-z0-9][a-z0-9._\\-]+" autocomplete="username" placeholder="영문 소문자·숫자 4자 이상"')}
       ${field('비밀번호', 'password', 'password', 'required minlength="10" maxlength="128" autocomplete="new-password" placeholder="영문과 숫자를 함께 10자 이상"')}
@@ -453,6 +486,7 @@ function openSupport() {
 
 const consoleNav = {
   admin: [
+    ['숏폼 배포', [['shortform', '숏폼 배포 관리', 'video'], ['sfcreators', '부업회원·채널', 'people'], ['sfpolicy', '단가·정책', 'card']]],
     ['운영', [['overview', '운영 대시보드', 'grid'], ['orders', '주문 심사', 'bag'], ['submissions', '미션 검수', 'survey'], ['charges', '충전 승인', 'card'], ['payouts', '출금 승인', 'wallet']]],
     ['외부 오퍼월', [['offerwall', '오퍼월 연동', 'target']]],
     ['설정', [['partners', '계정·수익률', 'people'], ['notices', '공지사항', 'bell'], ['inquiries', '문의 내역', 'chat'], ['audit', '운영 기록', 'history'], ['design', 'PC 배경', 'star']]]
@@ -461,12 +495,16 @@ const consoleNav = {
     ['내 활동', [['overview', '참여 대시보드', 'grid'], ['history', '참여 내역', 'survey'], ['rewards', '보상·출금', 'gift']]]
   ],
   business: [
-    ['캠페인', [['overview', '광고 대시보드', 'grid'], ['new', '주문 등록', 'target'], ['orders', '주문 내역', 'bag']]],
+    ['숏폼 배포', [['sfads', '숏폼 배포', 'video']]],
+    ['퀴즈·설문', [['overview', '광고 대시보드', 'grid'], ['new', '주문 등록', 'target'], ['orders', '주문 내역', 'bag']]],
     ['오퍼월', [['owads', '오퍼월 광고', 'gift']]],
     ['예산', [['charges', '잔액 충전', 'card'], ['ledger', '잔액 내역', 'book']]]
   ],
   operator: [
     ['파트너', [['agencies', '하위 대행사', 'people'], ['revenue', '수익·출금', 'gift']]]
+  ],
+  creator: [
+    ['숏폼 부업', [['overview', '부업 대시보드', 'grid'], ['sfjobs', '캠페인 찾기', 'video'], ['sftasks', '내 작업', 'survey'], ['sfchannels', '내 SNS 채널', 'phone'], ['sfearn', '수익·출금', 'wallet']]]
   ]
 };
 
@@ -729,7 +767,8 @@ function businessOverview(user) {
   const spent = sum(orders, order => order.approved * order.cost);
   const returned = sum(orders, 'returned');
   const pendingCharges = state.charges.filter(charge => charge.status === 'pending' && charge.user_id === user.id);
-  return `<section class="dash-hero"><div class="dash-hero-main"><span class="eyebrow">CAMPAIGN CENTER</span>
+  return `<a class="sf-promo" href="/manage?tab=sfads">${icon('video')}<span><b>숏폼 배포</b> · ${esc(roleName.creator)}이 실제 SNS 계정에 숏폼을 만들어 올려요. 승인된 배포만 집행됩니다.</span>${icon('chevron')}</a>
+    <section class="dash-hero"><div class="dash-hero-main"><span class="eyebrow">CAMPAIGN CENTER</span>
       <h2>${esc(user.name)}님, 오늘 캠페인 현황이에요</h2>
       <div class="hero-balance"><span>사용 가능 잔액</span><strong>${format(state.balances.credit)}<small> 원</small></strong>${pendingCharges.length ? `<em>충전 승인 대기 ${format(sum(pendingCharges, 'amount'))}원</em>` : ''}</div>
       <div class="hero-actions"><a class="btn lime" href="/manage?tab=new">새 광고 주문 ${icon('arrow')}</a><a class="btn ghost" href="/manage?tab=charges">잔액 충전</a></div></div>
@@ -818,6 +857,7 @@ function adminOverview() {
 
 function overview(user) {
   if (user.role === 'participant') return participantOverview();
+  if (user.role === 'creator') return asyncSlot('sfhome', new URLSearchParams());
   if (user.role === 'admin') return adminOverview();
   return businessOverview(user);
 }
@@ -831,6 +871,18 @@ const owAdmin = setupOfferwallConsole({ api, esc, format, field, textarea, selec
   today: () => state.date, isAdmin: () => state.user?.role === 'admin' });
 asyncViews.offerwall = params => owAdmin.adminView(params);
 asyncViews.owads = () => owAdmin.ownerView();
+const sfConsole = setupShortformConsole({ api, esc, format, field, textarea, select, btn, empty, panelHead, icon, modal, dialog, dateTime, day, pager, showToast, labelTables, barChart, ledgerTable,
+  payoutPanel: wallet => payoutPanel(wallet), go: url => go(url), today: () => state.date, isAdmin: () => state.user?.role === 'admin', label: () => roleName.creator,
+  run: (button, action) => act(button, action) });
+asyncViews.shortform = params => sfConsole.adminView('shortform', params);
+asyncViews.sfcreators = params => sfConsole.adminView('sfcreators', params);
+asyncViews.sfpolicy = params => sfConsole.adminView('sfpolicy', params);
+asyncViews.sfads = params => sfConsole.ownerView(params);
+asyncViews.sfhome = () => sfConsole.creatorHome();
+asyncViews.sfjobs = params => sfConsole.jobsView(params);
+asyncViews.sftasks = params => sfConsole.tasksView(params);
+asyncViews.sfchannels = () => sfConsole.channelsView();
+asyncViews.sfearn = params => sfConsole.earnView(params);
 const findOrder = id => state.campaigns?.find(item => item.id === id) || state.agencyCampaigns?.find(item => item.id === id);
 
 function orderCard(c, allowActions) {
@@ -1108,7 +1160,7 @@ function ledgerView(params) {
 function accountForm(admin) {
   const operators = admin ? state.accounts.filter(a => a.role === 'operator') : [];
   return `<form class="form" data-form="account">
-    ${admin ? select('계정 유형', 'role', [['advertiser', '광고주'], ['operator', '실행사'], ['agency', '대행사'], ['participant', '참여자']]) : ''}
+    ${admin ? select('계정 유형', 'role', [['advertiser', '광고주'], ['operator', '실행사'], ['agency', '대행사'], ['creator', `${roleName.creator} (승인 완료로 등록)`], ['participant', '참여자']]) : ''}
     ${admin ? `<div class="parent-field" hidden>${select('소속 실행사', 'parent_id', [['', '선택 안 함'], ...operators.map(a => [a.id, a.name])])}</div>` : ''}
     ${field('표시 이름', 'name', 'text', 'required maxlength="60"')}
     ${field('로그인 아이디', 'username', 'text', 'required minlength="4" maxlength="32" autocomplete="off"')}
@@ -1128,8 +1180,8 @@ function openAccount(id) {
   if (!a?.id) return;
   const hidden = action => `<input type="hidden" name="id" value="${a.id}"><input type="hidden" name="action" value="${action}">`;
   const operators = admin ? state.accounts.filter(item => item.role === 'operator') : [];
-  const walletNames = { credit: '광고 잔액', revenue: '실행사 수익', reward: '포인트' };
-  const wallets = a.role === 'participant' ? ['reward'] : a.role === 'operator' ? ['credit', 'revenue'] : ['credit'];
+  const walletNames = { credit: '광고 잔액', revenue: '실행사 수익', reward: '포인트', earning: '부업 수익' };
+  const wallets = a.role === 'participant' ? ['reward'] : a.role === 'creator' ? ['earning'] : a.role === 'operator' ? ['credit', 'revenue'] : ['credit'];
   modal(`${roleName[a.role]} · ${esc(a.username)}`, `${esc(a.name)} 계정 관리`, `
     ${admin ? `<div class="account-detail" data-account-detail="${a.id}"><p class="loading">계정 정보를 불러오는 중입니다.</p></div>
     <form class="form" data-form="account/adjust"><input type="hidden" name="id" value="${a.id}">
@@ -1189,7 +1241,7 @@ function partnerAdmin(params) {
     <section class="panel dash-block">${panelHead('등록 계정', `참여자 ${format(state.roleCounts.participant || 0)}명 포함 전체 ${format(sum(Object.values(state.roleCounts), v => v))}개`)}
       <form class="filter-bar" data-filter="partners"><label class="search">${icon('search')}<input name="q" type="search" value="${esc(params.get('q') || '')}" placeholder="이름, 아이디 검색"></label>
         <input type="hidden" name="role" value="${esc(filter)}">${btn('검색', 'type="submit"', 'primary small')}</form>
-      <div class="tabs">${[['', '전체'], ['advertiser', '광고주'], ['agency', '대행사'], ['operator', '실행사'], ['participant', '참여자'], ['admin', '관리자'], ['suspended', '이용 정지'], ['withdrawn', '탈퇴']].map(([key, label]) => `<a href="/manage?tab=partners${key ? '&amp;role=' + key : ''}" class="${key === filter ? 'on' : ''}">${label}</a>`).join('')}</div>
+      <div class="tabs">${[['', '전체'], ['advertiser', '광고주'], ['agency', '대행사'], ['operator', '실행사'], ['creator', roleName.creator], ['participant', '참여자'], ['admin', '관리자'], ['suspended', '이용 정지'], ['withdrawn', '탈퇴']].map(([key, label]) => `<a href="/manage?tab=partners${key ? '&amp;role=' + key : ''}" class="${key === filter ? 'on' : ''}">${label}</a>`).join('')}</div>
       ${list.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>이름</th><th>아이디</th><th>유형</th><th>소속</th><th class="num">광고 잔액</th><th>수익률</th><th></th></tr></thead><tbody>
       ${list.map(a => `<tr><td><b>${esc(a.name)}</b> ${accountStatus(a)}</td><td><small>${esc(a.username)}</small></td><td><span class="status">${roleName[a.role]}</span></td><td>${esc(a.parent || '−')}</td>
         <td class="num">${partners.includes(a.role) ? format(a.credit) + '원' : '−'}</td><td>${a.role === 'operator' ? (a.rate === null ? `기본 ${state.defaultRate / 100}%` : `${a.rate / 100}%`) : '−'}</td>
@@ -1255,7 +1307,7 @@ function payoutsAdmin(params) {
   const list = state.payouts.filter(p => status === 'all' || p.status === status);
   const pending = state.payouts.filter(p => p.status === 'pending');
   return `<div class="summary-strip">${[['지급 대기', `${format(pending.length)}건`], ['대기 포인트', `${format(sum(pending.filter(p => p.wallet === 'reward'), 'amount'))}P`],
-      ['대기 수익 출금', `${format(sum(pending.filter(p => p.wallet === 'revenue'), 'amount'))}원`], ['표시 범위', '최근 100건']].map(([label, value]) => `<div><span>${label}</span><b>${value}</b></div>`).join('')}</div>
+      ['대기 수익 출금', `${format(sum(pending.filter(p => p.wallet === 'revenue'), 'amount'))}원`], ['대기 부업 수익', `${format(sum(pending.filter(p => p.wallet === 'earning'), 'amount'))}원`], ['표시 범위', '최근 100건']].map(([label, value]) => `<div><span>${label}</span><b>${value}</b></div>`).join('')}</div>
     <section class="panel dash-block">${panelHead('출금 신청', '지급을 마친 뒤 ‘지급 완료’를 누르세요. 반려하면 금액이 신청자에게 돌아갑니다.', `<a class="btn quiet small" href="/api/export?type=payouts" download>${icon('download')} CSV 내려받기</a>`)}
     <div class="tabs">${[['all', '전체'], ['pending', '대기'], ['approved', '지급 완료'], ['rejected', '반려'], ['canceled', '취소']].map(([key, label]) => `<a href="/manage?tab=payouts&amp;status=${key}" class="${key === status ? 'on' : ''}">${label} <span class="count">${format(key === 'all' ? state.payouts.length : state.payouts.filter(p => p.status === key).length)}</span></a>`).join('')}</div>
     ${payoutTable(list, true)}</section>`;
@@ -1296,7 +1348,7 @@ asyncViews.submissions = async params => {
     ${pager(data.page, data.pages, link({ page: '' }))}`;
 };
 
-const audiences = { all: '전체', business: '광고 계정', participant: '참여자' };
+const audiences = { all: '전체', business: '광고 계정', participant: '참여자', creator: '부업회원' };
 const noticeForm = (path, item = {}) => `<form class="form" data-form="${path}">${item.id ? `<input type="hidden" name="id" value="${item.id}">` : ''}
   ${field('제목', 'title', 'text', `required minlength="2" maxlength="80" value="${esc(item.title || '')}"`)}
   ${textarea('내용', 'body', 'required minlength="2" maxlength="1000" rows="5"')}
@@ -1425,7 +1477,7 @@ function consoleProfile(user) {
   const inquiries = state.myInquiries || [];
   return `<div class="dash-grid g-1-1"><section class="panel console-profile"><h2>${esc(user.name)}</h2>${profileImageEditor(user)}
     <dl><div><dt>계정 유형</dt><dd>${roleName[user.role]}</dd></div><div><dt>로그인 아이디</dt><dd>${esc(user.username)}</dd></div>
-      ${user.role === 'participant' ? `<div><dt>보유 포인트</dt><dd>${format(state.balances.reward)}P</dd></div>` : user.role !== 'admin' ? `<div><dt>광고 잔액</dt><dd>${format(state.balances.credit)}원</dd></div>` : ''}</dl>
+      ${user.role === 'participant' ? `<div><dt>보유 포인트</dt><dd>${format(state.balances.reward)}P</dd></div>` : isCreator(user) ? `<div><dt>부업 수익</dt><dd>${format(state.balances.earning)}원</dd></div>` : user.role !== 'admin' ? `<div><dt>광고 잔액</dt><dd>${format(state.balances.credit)}원</dd></div>` : ''}</dl>
     <div class="actions">${btn('로그아웃', 'type="button" data-logout', 'quiet')}
       ${state.demo ? '<a class="btn primary" href="/login">테스트 계정 전환</a>' : ''}</div></section>
     <section class="panel">${panelHead('계정 설정')}
@@ -1441,9 +1493,11 @@ function consoleProfile(user) {
     ${user.role === 'admin' ? '' : `<section class="panel dash-block" id="my-inquiries" tabindex="-1">${panelHead('내 문의', `${format(inquiries.length)}건`, btn('새 문의', 'type="button" data-support', 'quiet small'))}
       ${inquiries.map(item => `<article class="notice-row"><div class="row-top"><span class="eyebrow">문의 #${item.id} · ${day(item.created)}</span><span class="status ${item.reply ? 'approved' : 'pending'}">${item.reply ? '답변 완료' : '답변 대기'}</span></div>
         <h3>${esc(item.subject)}</h3><p>${esc(item.message)}</p>${item.reply ? `<div class="reply"><span class="eyebrow">애즈폼 운영팀 · ${dateTime(item.replied)}</span><p>${esc(item.reply)}</p></div>` : ''}</article>`).join('') || empty('남긴 문의가 없어요.')}</section>`}
-    ${['participant', 'advertiser'].includes(user.role) && !user.is_demo ? `<section class="panel dash-block withdraw-panel">${panelHead('회원 탈퇴', '탈퇴하면 같은 계정으로 다시 로그인할 수 없어요.')}
+    ${['participant', 'advertiser', 'creator'].includes(user.role) && !user.is_demo ? `<section class="panel dash-block withdraw-panel">${panelHead('회원 탈퇴', '탈퇴하면 같은 계정으로 다시 로그인할 수 없어요.')}
       <details><summary>탈퇴 안내 보기</summary>
-        <ul class="plain-list">${user.role === 'participant'
+        <ul class="plain-list">${isCreator(user)
+          ? `<li>부업 수익 ${format(state.balances.earning)}원이 남아 있으면 먼저 출금을 신청해 주세요.</li><li>진행 중이거나 정산 대기 중인 숏폼 작업이 있으면 탈퇴할 수 없어요.</li><li>등록한 SNS 채널 정보는 함께 지워집니다.</li>`
+          : user.role === 'participant'
           ? `<li>보유 포인트 ${format(state.balances.reward)}P는 탈퇴와 함께 사라집니다. 5,000P 이상이면 먼저 출금을 신청해 주세요.</li><li>처리 중인 출금이 있으면 탈퇴할 수 없어요.</li>`
           : `<li>진행 중이거나 심사 중인 캠페인은 먼저 종료·취소해 주세요.</li><li>광고 잔액이 남아 있으면 문의하기로 환불을 요청한 뒤 탈퇴할 수 있어요.</li><li>승인 전 충전 신청은 자동으로 취소됩니다.</li>`}
           <li>거래·정산 기록은 관련 법령에 따라 보관되며, 이름과 아이디는 지워집니다.</li></ul>
@@ -1456,40 +1510,45 @@ function manage(params) {
   if (!user) return login(params);
   const admin = user.role === 'admin';
   const participant = user.role === 'participant';
-  const groups = admin ? consoleNav.admin : participant ? consoleNav.participant :
+  const creator = isCreator(user);
+  const groups = admin ? consoleNav.admin : participant ? consoleNav.participant : creator ? consoleNav.creator :
     [...consoleNav.business, ...(user.role === 'operator' ? consoleNav.operator : [])];
+  const navName = label => label === '부업회원·채널' ? `${roleName.creator}·채널` : label;
   const profile = ['profile', '프로필', 'user'];
   const pages = [...groups.flatMap(([, items]) => items), profile];
   const requested = params.get('tab');
-  const [tab, title] = pages.find(([key]) => key === requested) || pages[0];
+  const [tab, title] = pages.find(([key]) => key === (requested || (admin ? 'overview' : ''))) || pages[0];
   const missing = requested && requested !== tab;
   const badges = admin ? { orders: state.campaigns.filter(c => c.status === 'pending').length, submissions: state.adminCounts.pendingSubmissions,
-    charges: state.charges.filter(c => c.status === 'pending').length, inquiries: state.adminCounts.unreadInquiries, payouts: state.adminCounts.pendingPayouts, offerwall: state.adminCounts.offerwallPending } : {};
+    charges: state.charges.filter(c => c.status === 'pending').length, inquiries: state.adminCounts.unreadInquiries, payouts: state.adminCounts.pendingPayouts, offerwall: state.adminCounts.offerwallPending,
+    shortform: state.adminCounts.shortformPending, sfcreators: state.adminCounts.sfCreatorsPending } : {};
   const views = { overview: () => overview(user), new: () => orderForm(params), orders: () => orders(params, admin), charges: () => charges(params, admin), ledger: () => ledgerView(params),
     partners: () => partnerAdmin(params), notices, design, inquiries: () => inquiries(params), agencies, revenue: () => revenue(params), submissions: () => submissions(params),
-    history: () => participantHistory(params), rewards: () => participantRewards(params), profile: () => consoleProfile(user), payouts: () => payoutsAdmin(params), audit: () => auditView(params), offerwall: () => asyncSlot('offerwall', params), owads: () => asyncSlot('owads', params) };
+    history: () => participantHistory(params), rewards: () => participantRewards(params), profile: () => consoleProfile(user), payouts: () => payoutsAdmin(params), audit: () => auditView(params), offerwall: () => asyncSlot('offerwall', params), owads: () => asyncSlot('owads', params),
+    shortform: () => asyncSlot('shortform', params), sfcreators: () => asyncSlot('sfcreators', params), sfpolicy: () => asyncSlot('sfpolicy', params), sfads: () => asyncSlot('sfads', params),
+    sfjobs: () => asyncSlot('sfjobs', params), sftasks: () => asyncSlot('sftasks', params), sfchannels: () => asyncSlot('sfchannels', params), sfearn: () => asyncSlot('sfearn', params) };
   const banners = [
     missing ? `<p class="notice">${requested === 'new' ? '광고 주문은 광고주·대행사·실행사 계정에서 할 수 있어요.' : '이 계정에서 사용할 수 없는 메뉴라 대시보드를 보여 드려요.'}</p>` : '',
     user.must_change && tab !== 'profile' ? `<p class="notice warn">${icon('lock')} 운영팀이 만든 임시 비밀번호를 쓰고 있어요. <a href="/manage?tab=profile#password-form">비밀번호 변경하기</a></p>` : ''
   ].join('');
-  const menuLink = ([key, label, glyph]) => `<a href="/manage?tab=${key}"${key === tab ? ' aria-current="page"' : ''}>${key === 'profile' ? profileAvatar(user, 'avatar-small') : icon(glyph)}<span>${label}</span>${badges[key] ? `<em class="nav-badge">${format(badges[key])}</em>` : ''}</a>`;
-  const balanceLine = participant ? `${format(state.balances.reward)} P` : admin ? '' : `${format(state.balances.credit)}원`;
+  const menuLink = ([key, label, glyph]) => `<a href="/manage?tab=${key}"${key === tab ? ' aria-current="page"' : ''}>${key === 'profile' ? profileAvatar(user, 'avatar-small') : icon(glyph)}<span>${esc(navName(label))}</span>${badges[key] ? `<em class="nav-badge">${format(badges[key])}</em>` : ''}</a>`;
+  const balanceLine = participant ? `${format(state.balances.reward)} P` : creator ? `${format(state.balances.earning)}원` : admin ? '' : `${format(state.balances.credit)}원`;
   return `<div class="console-frame">
     <div class="console-mobile-bar"><button type="button" class="icon-btn" data-console-menu aria-controls="console-sidebar" aria-expanded="false" aria-label="관리 메뉴 열기">${icon('menu')}</button>
-      <strong>${title}</strong>${bellButton('mobile-bell')}<a class="console-mobile-profile" href="/manage?tab=profile" aria-label="프로필">${profileAvatar(user)}${roleName[user.role]}</a></div>
+      <strong>${esc(navName(title))}</strong>${bellButton('mobile-bell')}<a class="console-mobile-profile" href="/manage?tab=profile" aria-label="프로필">${profileAvatar(user)}${roleName[user.role]}</a></div>
     <div class="console-backdrop" data-console-close hidden></div>
     <aside id="console-sidebar" class="console-sidebar">
       <div class="console-brand"><a class="logo" href="/manage" aria-label="애즈폼 대시보드">${brandMark}${wordmark}</a>
         <button type="button" class="icon-btn console-close" data-console-close aria-label="관리 메뉴 닫기">${icon('close')}</button></div>
       <div class="console-identity">${profileAvatar(user)}<div><strong>${esc(user.name)}</strong><small>${roleName[user.role]}${state.demo ? ' · 로컬 데모' : ''}</small></div></div>
-      ${balanceLine ? `<a class="console-wallet" href="/manage?tab=${participant ? 'rewards' : 'ledger'}"><span>${participant ? '보유 포인트' : '광고 잔액'}</span><b>${balanceLine}</b></a>` : ''}
+      ${balanceLine ? `<a class="console-wallet" href="/manage?tab=${participant ? 'rewards' : creator ? 'sfearn' : 'ledger'}"><span>${participant ? '보유 포인트' : creator ? '부업 수익' : '광고 잔액'}</span><b>${balanceLine}</b></a>` : ''}
       <nav aria-label="관리 메뉴">${groups.map(([group, items]) => `<div class="console-nav-group"><span>${group}</span>${items.map(menuLink).join('')}</div>`).join('')}
       ${participant ? `<div class="console-nav-group"><a href="/missions">${icon('target')}<span>미션 찾기</span></a></div>` : ''}</nav>
       <nav class="console-bottom" aria-label="프로필과 메인 이동">${menuLink(profile)}<a href="/">${icon('home')}<span>메인으로</span></a></nav>
     </aside>
     <div class="console-workspace"><div class="console-content">
-      <header class="console-head"><div><span class="eyebrow">${admin ? 'ADSFORM STUDIO' : participant ? 'ADSFORM REWARDS' : 'ADSFORM BUSINESS'}</span><h1>${title}</h1></div>
-        <div class="console-head-side">${tab !== 'new' && !admin && !participant ? `<a class="btn primary small" href="/manage?tab=new">${icon('target')} 새 주문</a>` : ''}${bellButton()}<time datetime="${state.date}">${day(state.date)}</time></div></header>
+      <header class="console-head"><div><span class="eyebrow">${admin ? 'ADSFORM STUDIO' : participant ? 'ADSFORM REWARDS' : creator ? 'ADSFORM CREATOR' : 'ADSFORM BUSINESS'}</span><h1>${esc(navName(title))}</h1></div>
+        <div class="console-head-side">${tab !== 'new' && !admin && !participant && !creator ? (tab === 'sfads' ? btn(`${icon('video')} 숏폼 캠페인 등록`, 'type="button" data-sf-new', 'primary small') : `<a class="btn primary small" href="/manage?tab=new">${icon('target')} 새 주문</a>`) : ''}${bellButton()}<time datetime="${state.date}">${day(state.date)}</time></div></header>
       <div class="console-view">${banners}${views[tab]()}</div>
     </div></div>
   </div>`;
@@ -1527,7 +1586,7 @@ function afterLogin(user) {
   if (user.must_change) return '/manage?tab=profile';
   if (next === 'missions' && user.role === 'participant') return '/missions';
   if (next === 'rewards' && user.role === 'participant') return '/manage?tab=rewards';
-  if (next === 'order' && !['participant', 'admin'].includes(user.role)) return '/manage?tab=new';
+  if (next === 'order' && !['participant', 'admin', 'creator'].includes(user.role)) return '/manage?tab=new';
   return '/manage';
 }
 
@@ -1581,6 +1640,7 @@ document.addEventListener('click', event => {
   const button = event.target.closest('button');
   if (!button || !state) return;
   const d = button.dataset;
+  if (state.user && sfConsole.click(button)) return;
   if (state.user && state.user.role !== 'participant' && owAdmin.click(button)) return;
   if ('consoleClose' in d) setConsoleMenu(false);
   if ('consoleMenu' in d) setConsoleMenu(button.getAttribute('aria-expanded') !== 'true');
@@ -1690,6 +1750,11 @@ document.addEventListener('input', event => {
   if (form?.dataset.form === 'campaign/extend') updateExtendForm(form);
   if (form?.dataset.form === 'charge') updateChargeForm(form);
   if (form?.dataset.form?.startsWith('offerwall/') || event.target.matches?.('[data-ow-image]')) owAdmin.input(event);
+  if (form?.dataset.form?.startsWith('shortform/') || event.target.matches?.('[data-sf-image]')) sfConsole.input(event);
+  if (form?.dataset.form === 'signup' && event.target.name === 'role') {
+    const extra = form.querySelector('[data-role-for="creator"]');
+    extra.hidden = extra.disabled = event.target.value !== 'creator';
+  }
   if (form?.dataset.form === 'account' && event.target.name === 'role') {
     const parent = form.querySelector('.parent-field');
     parent.hidden = event.target.value !== 'agency';
@@ -1719,7 +1784,7 @@ document.addEventListener('submit', event => {
   const button = event.submitter || form.querySelector('button[type="submit"]');
   act(button, async () => {
     const data = Object.fromEntries(new FormData(form));
-    if (['campaign', 'charge', 'inquiry', 'payout', 'offerwall/offer'].includes(path)) {
+    if (['campaign', 'charge', 'inquiry', 'payout', 'offerwall/offer', 'shortform/campaign'].includes(path)) {
       form.dataset.key ||= crypto.randomUUID();
       data.key = form.dataset.key;
     }
@@ -1730,6 +1795,11 @@ document.addEventListener('submit', event => {
       if (dialog.open) dialog.close();
       await reload();
       return owAdmin.after(path, result) || showToast('처리했습니다.');
+    }
+    if (path.startsWith('shortform/')) {
+      if (dialog.open) dialog.close();
+      await reload();
+      return sfConsole.after(path, result, data);
     }
     if (path === 'mission/reserve') {
       await reload();
@@ -1743,7 +1813,7 @@ document.addEventListener('submit', event => {
       return showToast('탈퇴 처리했습니다. 그동안 이용해 주셔서 고마워요.');
     }
     if (path === 'login' || path === 'signup') {
-      const next = path === 'signup' ? (result.user.role === 'participant' ? '/missions' : '/manage?tab=charges') : afterLogin(result.user);
+      const next = path === 'signup' ? ({ participant: '/missions', creator: '/manage?tab=sfchannels' }[result.user.role] || '/manage?tab=sfads') : afterLogin(result.user);
       state = await api('/api/state');
       go(next);
     } else if (path !== 'inquiry') {
