@@ -1,5 +1,6 @@
 import { setupOfferwallConsole } from './offerwall-console.js';
 import { setupShortformConsole } from './shortform-console.js';
+import { setupLiveConsole } from './live-console.js';
 
 const icons = {
   home: '<path d="m3 10 9-7 9 7v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 21v-7h6v7"/>',
@@ -488,7 +489,7 @@ const consoleNav = {
   admin: [
     ['숏폼 배포', [['shortform', '숏폼 배포 관리', 'video'], ['sfcreators', '부업회원·채널', 'people'], ['sfpolicy', '단가·정책', 'card']]],
     ['운영', [['overview', '운영 대시보드', 'grid'], ['orders', '주문 심사', 'bag'], ['submissions', '미션 검수', 'survey'], ['charges', '충전 승인', 'card'], ['payouts', '출금 승인', 'wallet']]],
-    ['외부 오퍼월', [['offerwall', '오퍼월 연동', 'target']]],
+    ['외부 오퍼월', [['liveorders', '라이브 주문 심사', 'video'], ['offerwall', '오퍼월 연동', 'target']]],
     ['설정', [['partners', '계정·수익률', 'people'], ['notices', '공지사항', 'bell'], ['inquiries', '문의 내역', 'chat'], ['audit', '운영 기록', 'history'], ['design', 'PC 배경', 'star']]]
   ],
   participant: [
@@ -497,7 +498,7 @@ const consoleNav = {
   business: [
     ['숏폼 배포', [['sfads', '숏폼 배포', 'video']]],
     ['퀴즈·설문', [['overview', '광고 대시보드', 'grid'], ['new', '주문 등록', 'target'], ['orders', '주문 내역', 'bag']]],
-    ['오퍼월', [['owads', '오퍼월 광고', 'gift']]],
+    ['오퍼월', [['liveads', '라이브 셀러 광고', 'video'], ['owads', '오퍼월 광고', 'gift']]],
     ['예산', [['charges', '잔액 충전', 'card'], ['ledger', '잔액 내역', 'book']]]
   ],
   operator: [
@@ -871,6 +872,9 @@ const owAdmin = setupOfferwallConsole({ api, esc, format, field, textarea, selec
   today: () => state.date, isAdmin: () => state.user?.role === 'admin' });
 asyncViews.offerwall = params => owAdmin.adminView(params);
 asyncViews.owads = () => owAdmin.ownerView();
+const liveConsole = setupLiveConsole({ api, esc, format, field, textarea, select, btn, empty, panelHead, icon, modal, dialog, dateTime, showToast, decision });
+asyncViews.liveads = () => liveConsole.ownerView();
+asyncViews.liveorders = params => liveConsole.adminView(params);
 const sfConsole = setupShortformConsole({ api, esc, format, field, textarea, select, btn, empty, panelHead, icon, modal, dialog, dateTime, day, pager, showToast, labelTables, barChart, ledgerTable,
   payoutPanel: wallet => payoutPanel(wallet), go: url => go(url), today: () => state.date, isAdmin: () => state.user?.role === 'admin', label: () => roleName.creator,
   run: (button, action) => act(button, action) });
@@ -1520,11 +1524,12 @@ function manage(params) {
   const [tab, title] = pages.find(([key]) => key === (requested || (admin ? 'overview' : ''))) || pages[0];
   const missing = requested && requested !== tab;
   const badges = admin ? { orders: state.campaigns.filter(c => c.status === 'pending').length, submissions: state.adminCounts.pendingSubmissions,
-    charges: state.charges.filter(c => c.status === 'pending').length, inquiries: state.adminCounts.unreadInquiries, payouts: state.adminCounts.pendingPayouts, offerwall: state.adminCounts.offerwallPending,
+    charges: state.charges.filter(c => c.status === 'pending').length, inquiries: state.adminCounts.unreadInquiries, payouts: state.adminCounts.pendingPayouts, offerwall: state.adminCounts.offerwallPending, liveorders: state.adminCounts.liveReview,
     shortform: state.adminCounts.shortformPending, sfcreators: state.adminCounts.sfCreatorsPending } : {};
   const views = { overview: () => overview(user), new: () => orderForm(params), orders: () => orders(params, admin), charges: () => charges(params, admin), ledger: () => ledgerView(params),
     partners: () => partnerAdmin(params), notices, design, inquiries: () => inquiries(params), agencies, revenue: () => revenue(params), submissions: () => submissions(params),
     history: () => participantHistory(params), rewards: () => participantRewards(params), profile: () => consoleProfile(user), payouts: () => payoutsAdmin(params), audit: () => auditView(params), offerwall: () => asyncSlot('offerwall', params), owads: () => asyncSlot('owads', params),
+    liveads: () => asyncSlot('liveads', params), liveorders: () => asyncSlot('liveorders', params),
     shortform: () => asyncSlot('shortform', params), sfcreators: () => asyncSlot('sfcreators', params), sfpolicy: () => asyncSlot('sfpolicy', params), sfads: () => asyncSlot('sfads', params),
     sfjobs: () => asyncSlot('sfjobs', params), sftasks: () => asyncSlot('sftasks', params), sfchannels: () => asyncSlot('sfchannels', params), sfearn: () => asyncSlot('sfearn', params) };
   const banners = [
@@ -1641,6 +1646,7 @@ document.addEventListener('click', event => {
   if (!button || !state) return;
   const d = button.dataset;
   if (state.user && sfConsole.click(button)) return;
+  if (state.user && state.user.role !== 'participant' && liveConsole.click(button)) return;
   if (state.user && state.user.role !== 'participant' && owAdmin.click(button)) return;
   if ('consoleClose' in d) setConsoleMenu(false);
   if ('consoleMenu' in d) setConsoleMenu(button.getAttribute('aria-expanded') !== 'true');
@@ -1731,7 +1737,11 @@ document.addEventListener('click', event => {
       'offerwall/offer/status:activate': '광고를 다시 매체 오퍼월에 공급합니다.',
       'offerwall/offer/status:close': '광고를 종료하고 완료 건 기준으로 남은 예산을 잔액으로 돌려드립니다. 종료 후에는 다시 열 수 없고, 검수 중인 참여가 있으면 종료할 수 없어요.',
       'offerwall/click/review:approve': '승인하면 광고 예산에서 집행하고 매체에 리워드 지급(포스트백)을 요청합니다. 되돌릴 수 없어요.',
-      'offerwall/click/review:reject': '반려하면 리워드가 지급되지 않고 매체 회원의 참여 화면에 사유가 표시됩니다.'
+      'offerwall/click/review:reject': '반려하면 리워드가 지급되지 않고 매체 회원의 참여 화면에 사유가 표시됩니다.',
+      'live/status:approve': '주문한 상품 광고를 모두 승인하고, 방송 시간에 맞춘 노출 구간에 연동 매체로 공급합니다. 노출 시간이 이미 지난 상품은 예산을 돌려드려요.',
+      'live/status:reject': '주문 전체를 반려하고 배정된 예산을 모두 셀러 잔액으로 돌려드립니다. 반려 사유는 셀러에게 알림으로 전달돼요.',
+      'live/status:cancel': '심사 전 주문을 취소하고 배정된 예산을 모두 잔액으로 돌려드립니다.',
+      'live/status:close': '매체 노출을 바로 멈추고 완료 건 기준으로 정산합니다. 검수 대기 참여가 있으면 검수 후 자동 정산되고, 남은 예산은 잔액으로 돌아와요.'
     }[`${d.decision}:${d.action}`];
     modal('ADSFORM', label + ' 확인', `<p>${explanation || `선택한 항목을 ${label} 처리합니다.`}</p>
       <form data-form="${esc(d.decision)}" class="form"><input type="hidden" name="id" value="${esc(d.id)}"><input type="hidden" name="action" value="${esc(d.action)}">
@@ -1750,6 +1760,7 @@ document.addEventListener('input', event => {
   if (form?.dataset.form === 'campaign/extend') updateExtendForm(form);
   if (form?.dataset.form === 'charge') updateChargeForm(form);
   if (form?.dataset.form?.startsWith('offerwall/') || event.target.matches?.('[data-ow-image]')) owAdmin.input(event);
+  if (form?.dataset.form?.startsWith('live/')) liveConsole.input(event);
   if (form?.dataset.form?.startsWith('shortform/') || event.target.matches?.('[data-sf-image]')) sfConsole.input(event);
   if (form?.dataset.form === 'signup' && event.target.name === 'role') {
     const extra = form.querySelector('[data-role-for="creator"]');
@@ -1784,13 +1795,18 @@ document.addEventListener('submit', event => {
   const button = event.submitter || form.querySelector('button[type="submit"]');
   act(button, async () => {
     const data = Object.fromEntries(new FormData(form));
-    if (['campaign', 'charge', 'inquiry', 'payout', 'offerwall/offer', 'shortform/campaign'].includes(path)) {
+    if (['campaign', 'charge', 'inquiry', 'payout', 'offerwall/offer', 'shortform/campaign', 'live/order'].includes(path)) {
       form.dataset.key ||= crypto.randomUUID();
       data.key = form.dataset.key;
     }
     if (path === 'password' && data.password !== data.confirm) throw new Error('새 비밀번호 확인이 일치하지 않습니다.');
     if (path === 'mission/review/bulk') data.ids = data.ids.split(',').map(Number);
     const result = await api('/api/' + path, data);
+    if (path.startsWith('live/')) {
+      if (dialog.open) dialog.close();
+      await reload();
+      return liveConsole.after(path, result);
+    }
     if (path.startsWith('offerwall/')) {
       if (dialog.open) dialog.close();
       await reload();

@@ -1,6 +1,6 @@
 // 오퍼월 매체(버즈빌·애드팝콘 등) 회원이 보는 화면
 //  /ow/wall      : 포인트 받기(방문하기·참여하기·팔로우하기·콘텐츠보기) · 포인트 조회
-//  /ow/{광고}    : 광고별 참여 화면(방문·콘텐츠·팔로우·퀴즈·설문·미션형)
+//  /ow/{광고}    : 광고별 참여 화면(방문·콘텐츠·팔로우·퀴즈·설문·미션형 · 라이브 시청 확인·캡처 인증 미션)
 const root = document.getElementById('ow');
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const format = value => new Intl.NumberFormat('ko-KR').format(value);
@@ -29,7 +29,8 @@ const icons = {
   back: '<path d="M15 5l-7 7 7 7"/>', external: '<path d="M14 4h6v6M20 4l-9 9M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/>',
   camera: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>', check: '<path d="m5 12 4 4L19 6"/>'
 };
-const typeName = { visit: '방문하기', content: '콘텐츠보기', follow: '팔로우하기', quiz: '퀴즈', survey: '설문', cpa: '미션' };
+const typeName = { visit: '방문하기', content: '콘텐츠보기', follow: '팔로우하기', quiz: '퀴즈', survey: '설문', cpa: '미션', watch: '라이브 시청', mission: '인증 미션' };
+const liveName = { notify: '라이브 알림', enter: '라이브', watch: '라이브 시청', quiz: '라이브 퀴즈', follow: '팔로우', coupon: '방송 쿠폰', signup: '라이브 미션' };
 // 이미지가 없는 광고는 제목 첫 글자로 아이콘을 만듭니다(인라인 스타일 없이 색상 클래스 사용).
 const letterIcon = (title, size = '') => `<span class="ow-letter t${[...title].reduce((sum, char) => sum + char.charCodeAt(0), 0) % 6} ${size}">${esc([...title.replace(/^\[[^\]]*\]\s*/, '')][0] || 'A')}</span>`;
 const thumb = (item, size = '') => item.icon_url || item.icon ? `<img class="ow-icon ${size}" src="${esc(item.icon_url || item.icon)}" alt="" loading="lazy">` : letterIcon(item.title, size);
@@ -137,7 +138,7 @@ function result(status, extra = '', html = '') {
 function header(offer) {
   return `${backLink()}${preview ? '<p class="ow-preview">미리보기 · 제출해도 기록되지 않아요</p>' : ''}
     ${offer.banner ? `<img class="ow-banner" src="${esc(offer.banner)}" alt="">` : ''}
-    <header class="ow-head">${offer.banner ? '' : thumb(offer, 'large')}<div><span class="ow-tag">${typeName[offer.type]} · ${esc(offer.brand)}</span><h1>${esc(offer.title)}</h1>
+    <header class="ow-head">${offer.banner ? '' : thumb(offer, 'large')}<div><span class="ow-tag">${offer.live ? `<b class="ow-live-dot">LIVE</b> ${liveName[offer.live] || ''}` : typeName[offer.type]} · ${esc(offer.brand)}</span><h1>${esc(offer.title)}</h1>
       <p class="ow-reward"><b>${format(offer.reward)}${esc(offer.unit)}</b> ${esc(offer.action)} · ${esc(offer.network)} 지급</p></div></header>
     <section class="ow-intro"><p>${esc(offer.intro).replace(/\n/g, '<br>')}</p></section>`;
 }
@@ -147,7 +148,8 @@ function dwell(button, label) {
   const ready = () => {
     const left = Math.ceil(offer.minDwell - (Date.now() + offset - click.opened) / 1000);
     button.disabled = left > 0;
-    button.textContent = left > 0 ? `내용을 확인해 주세요 · ${left}초` : label;
+    // 라이브 시청 확인은 분 단위 시청 시간이 남아 있음을 보여 줍니다.
+    button.textContent = left <= 0 ? label : offer.type === 'watch' ? `방송 시청 중 · ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')} 남음` : `내용을 확인해 주세요 · ${left}초`;
     return left <= 0;
   };
   clearInterval(timer);
@@ -165,6 +167,28 @@ function followBody() {
     <li><b>2</b><div><strong>${offer.verify === 'keyword' ? '인증 키워드 입력' : '인증 화면 올리기'}</strong><p>${esc(offer.guide || (offer.verify === 'keyword' ? '채널에서 안내하는 인증 키워드를 입력하세요.' : `${verb} 완료가 보이는 화면을 캡처해 올려 주세요. 운영팀 확인 후 지급돼요.`))}</p>
       ${offer.verify === 'keyword' ? '<input class="ow-input" name="keyword" maxlength="40" autocomplete="off" placeholder="인증 키워드">'
         : `<label class="ow-file">${svg(icons.camera, 20)}<span data-file-label>캡처 화면 선택</span><input type="file" name="proof" accept="image/*" hidden></label>`}</div></li></ol>
+    <p class="ow-error" role="alert" hidden></p><button class="ow-submit" type="button" data-follow>인증하고 리워드 받기</button>`;
+}
+
+// 라이브 시청 확인: 방송을 열어 정한 시간 이상 보고, 방송 중 공개되는 키워드를 입력합니다.
+function watchBody() {
+  const { offer } = data;
+  const minutes = Math.ceil(offer.minDwell / 60);
+  return `<ol class="ow-steps"><li><b>1</b><div><strong>라이브 방송 보기</strong><p>방송을 ${minutes}분 이상 시청해 주세요. 이 화면은 닫지 말고 그대로 두세요.</p>
+      <a class="ow-outline" href="${esc(offer.target)}" target="_blank" rel="noopener noreferrer">방송 보러 가기 ${svg(icons.external, 16)}</a></div></li>
+    <li><b>2</b><div><strong>시청 확인 키워드 입력</strong><p>${esc(offer.guide || '방송 중 화면이나 셀러 멘트로 공개되는 키워드를 입력해 주세요.')}</p>
+      <input class="ow-input" name="keyword" maxlength="40" autocomplete="off" placeholder="방송에서 들은 키워드"></div></li></ol>
+    <p class="ow-error" role="alert" hidden></p><button class="ow-submit" type="button" data-follow>시청 인증하고 리워드 받기</button>`;
+}
+
+// 캡처 인증 미션(라이브 알림 신청·쿠폰 받기): 안내한 페이지에서 미션을 마치고 완료 화면을 올립니다.
+function missionBody() {
+  const { offer } = data;
+  const verb = offer.live === 'notify' ? '방송 알림 신청' : offer.live === 'coupon' ? '쿠폰 받기' : '미션';
+  return `<ol class="ow-steps"><li><b>1</b><div><strong>${verb}</strong><p>${esc(offer.guide || '안내한 페이지에서 미션을 마쳐 주세요.')}</p>
+      <a class="ow-outline" href="${esc(offer.target)}" target="_blank" rel="noopener noreferrer">${offer.live === 'notify' ? '방송 페이지 열기' : '페이지 열기'} ${svg(icons.external, 16)}</a></div></li>
+    <li><b>2</b><div><strong>완료 화면 올리기</strong><p>${verb} 완료가 보이는 화면을 캡처해 올려 주세요. 운영팀 확인 후 지급돼요.</p>
+      <label class="ow-file">${svg(icons.camera, 20)}<span data-file-label>캡처 화면 선택</span><input type="file" name="proof" accept="image/*" hidden></label></div></li></ol>
     <p class="ow-error" role="alert" hidden></p><button class="ow-submit" type="button" data-follow>인증하고 리워드 받기</button>`;
 }
 
@@ -198,13 +222,16 @@ function renderOffer(notice = '') {
   const { offer, click } = data;
   if (offer.type === 'cpa') return renderMission(notice);
   if (['visit', 'content'].includes(offer.type) && click.status === 'completed') {
-    return result('completed', offer.repeat === 'daily' ? '오늘은 이미 참여했어요. 내일 다시 참여할 수 있어요.' : '', `<a class="ow-submit" href="${esc(offer.target)}" rel="noopener">페이지 다시 보기 ${svg(icons.external, 18)}</a>`);
+    return result('completed', offer.repeat === 'daily' ? '오늘은 이미 참여했어요. 내일 다시 참여할 수 있어요.' : '', `<a class="ow-submit" href="${esc(offer.target)}" rel="noopener">${offer.live ? '방송 다시 보기' : '페이지 다시 보기'} ${svg(icons.external, 18)}</a>`);
   }
+  if (offer.live && offer.target && click.status === 'completed') return result('completed', '', liveLink(offer.target));
   if (click.status !== 'started') return result(click.status, click.status === 'rejected' && click.reason ? `사유: ${click.reason}` : '');
-  const body = { visit: visitBody, content: visitBody, follow: followBody, quiz: formBody, survey: formBody }[offer.type]();
+  const body = { visit: visitBody, content: visitBody, follow: followBody, quiz: formBody, survey: formBody, watch: watchBody, mission: missionBody }[offer.type]();
   root.innerHTML = `${header(offer)}${notice ? `<p class="ow-notice" role="alert">${esc(notice)}</p>` : ''}${body}`;
   bind();
 }
+
+const liveLink = url => `<a class="ow-submit" href="${esc(url)}" rel="noopener">방송 보러 가기 ${svg(icons.external, 18)}</a>`;
 
 function showError(text) {
   const node = root.querySelector('.ow-error');
@@ -249,12 +276,12 @@ function bind() {
   const { offer } = data;
   const visit = root.querySelector('[data-visit]');
   if (visit) {
-    dwell(visit, `${offer.type === 'content' ? '콘텐츠 보고' : '방문하고'} ${format(offer.reward)}${offer.unit} 받기`);
+    dwell(visit, `${offer.live ? '방송 입장하고' : offer.type === 'content' ? '콘텐츠 보고' : '방문하고'} ${format(offer.reward)}${offer.unit} 받기`);
     visit.addEventListener('click', async () => {
       const outcome = await send(visit, {});
       if (!outcome) return;
       if (outcome.status === 'completed' && outcome.url) {
-        message('적립 완료!', '광고 페이지로 이동할게요.', 'done');
+        message('적립 완료!', offer.live ? '방송 화면으로 이동할게요.' : '광고 페이지로 이동할게요.', 'done');
         if (!preview) setTimeout(() => location.assign(outcome.url), 700);
         return;
       }
@@ -263,7 +290,7 @@ function bind() {
   }
   const follow = root.querySelector('[data-follow]');
   if (follow) {
-    dwell(follow, '인증하고 리워드 받기');
+    dwell(follow, offer.type === 'watch' ? '시청 인증하고 리워드 받기' : '인증하고 리워드 받기');
     const file = root.querySelector('input[name="proof"]');
     file?.addEventListener('change', () => { root.querySelector('[data-file-label]').textContent = file.files[0]?.name || '캡처 화면 선택'; });
     follow.addEventListener('click', async () => {
@@ -272,8 +299,8 @@ function bind() {
         if (!keyword) return showError('인증 키워드를 입력해 주세요.');
         const outcome = await send(follow, { keyword });
         if (!outcome) return;
-        if (outcome.status === 'retry') return renderOffer(`인증 키워드가 달라요. 남은 기회 ${outcome.triesLeft}번`);
-        return result(outcome.status);
+        if (outcome.status === 'retry') return renderOffer(`${offer.type === 'watch' ? '방송 키워드' : '인증 키워드'}가 달라요. 남은 기회 ${outcome.triesLeft}번`);
+        return result(outcome.status, '', outcome.status === 'completed' && outcome.url ? liveLink(outcome.url) : '');
       }
       let blob;
       try { blob = await reencode(file.files[0]); } catch (error) { return showError(error.message); }
@@ -310,7 +337,8 @@ function bind() {
         data.click.triesLeft = outcome.triesLeft;
         return renderOffer(`정답이 아닌 문항이 있어요. 남은 기회 ${outcome.triesLeft}번 · 내용을 다시 확인해 보세요.`);
       }
-      result(outcome.status);
+      // 라이브 퀴즈는 정답을 맞히면 방송 화면으로 안내합니다.
+      result(outcome.status, '', outcome.status === 'completed' && outcome.url ? liveLink(outcome.url) : '');
     });
   }
 }

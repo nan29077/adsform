@@ -7,6 +7,7 @@ import { gzipSync } from 'node:zlib';
 import { DatabaseSync } from 'node:sqlite';
 import { setupOfferwall } from './offerwall.mjs';
 import { setupShortform } from './shortform.mjs';
+import { setupLive } from './live.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.ADSFORM_PORT || 3063);
@@ -728,6 +729,7 @@ function summary(user) {
       unreadInquiries: get('SELECT COUNT(*) AS total FROM inquiries WHERE reviewed IS NULL').total,
       pendingPayouts: get("SELECT COUNT(*) AS total FROM payouts WHERE status='pending'").total,
       offerwallPending: ow.counts().review + ow.counts().pending,
+      liveReview: live.counts().review,
       ...(() => {
         const c = sf.counts();
         return { shortformPending: c.campaigns + c.posted, sfCreatorsPending: c.creators + c.channels };
@@ -1583,6 +1585,11 @@ const ow = setupOfferwall({ db, get, all, run, transaction, audit, notify, entry
 Object.assign(routes, ow.routes);
 Object.assign(getRoutes, ow.getRoutes);
 
+// 라이브 셀러 광고 주문(방송 1건 단위로 오퍼월 광고를 묶어 공급)은 live.mjs에 있습니다.
+const live = setupLive({ db, get, all, run, transaction, audit, notify, balance, won, assert, fail, str, int, now, dateKst, dayStart, setting, demo }, ow.internal);
+Object.assign(routes, live.routes);
+Object.assign(getRoutes, live.getRoutes);
+
 // 숏폼 배포(부업회원·SNS 채널·캠페인·배포 검수·정산)는 shortform.mjs에 있습니다.
 const sf = setupShortform({ db, get, all, run, transaction, audit, notify, entry, balance, won, assert, fail, str, int, date, limit, now, dateKst, dayStart, setting, readBody, headers, json, demo, addUser });
 Object.assign(routes, sf.routes);
@@ -1643,7 +1650,7 @@ const server = createServer(async (req, res) => {
     }
     if (['GET', 'HEAD'].includes(req.method)) {
       const pathname = pages.includes(url.pathname) ? '/index.html' : url.pathname;
-      const allowed = ['/index.html', '/app.js', '/styles.css', '/icon.svg', '/offerwall-console.js', '/shortform-console.js', '/ow.js', '/ow.css'].includes(pathname)
+      const allowed = ['/index.html', '/app.js', '/styles.css', '/icon.svg', '/offerwall-console.js', '/shortform-console.js', '/live-console.js', '/ow.js', '/ow.css'].includes(pathname)
         || /^\/assets\/[a-z-]+\.(jpg|webp)$/.test(pathname) || /^\/assets\/fonts\/[A-Za-z-]+\.woff2$/.test(pathname);
       if (allowed) {
         const file = staticFile(pathname);

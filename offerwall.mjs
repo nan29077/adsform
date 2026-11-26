@@ -8,6 +8,8 @@
 //                    회원이 누르면 클릭 ID·회원 식별값을 붙여 /ow/{광고}로 보냅니다.
 //    2) 오퍼월 호스팅: 매체가 회원 식별값만 붙여 /ow/wall 을 열면 애즈폼이 '포인트 받기·포인트 조회' 화면을 그대로 보여 줍니다.
 //  · 광고 유형: 방문하기(visit) · 콘텐츠보기(content) · 팔로우하기(follow) · 퀴즈(quiz) · 설문(survey) · 미션형 CPA(cpa)
+//              라이브 셀러 주문(live.mjs) 전용: 라이브 시청 확인(watch) · 캡처 인증 미션(mission)
+//  · 라이브 광고는 방송 시간에 맞춘 노출 구간(open_at~close_at)이 있어, 구간 밖에서는 피드·오퍼월·랜딩에서 빠집니다.
 //  · 완료되면 매체의 포스트백 주소로 서명된 완료 알림을 보내고, 매체가 자기 회원에게 리워드를 지급합니다.
 //  · 광고 계정의 광고는 등록 시 예산(건당 단가 × 목표)을 잔액에서 배정하고, 완료 건만 집행한 뒤 종료 시 남은 예산을 돌려줍니다.
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
@@ -30,8 +32,12 @@ export const offerTypes = {
   follow: { category: 'follow', label: '팔로우하기', repeat: 'once', cost: 250, dwell: 0 },
   quiz: { category: 'join', label: '퀴즈', repeat: 'once', cost: 80, dwell: 5 },
   survey: { category: 'join', label: '설문', repeat: 'once', cost: 250, dwell: 10 },
-  cpa: { category: 'join', label: '미션형', repeat: 'once', cost: 300, dwell: 0 }
+  cpa: { category: 'join', label: '미션형', repeat: 'once', cost: 300, dwell: 0 },
+  // 라이브 셀러 주문 전용 유형(단가는 live_cost_* 설정을 씁니다)
+  watch: { category: 'content', label: '라이브 시청', repeat: 'once', cost: 300, dwell: 180, live: true },
+  mission: { category: 'join', label: '인증 미션', repeat: 'once', cost: 200, dwell: 5, live: true }
 };
+const generalTypes = Object.keys(offerTypes).filter(type => !offerTypes[type].live);
 export const categories = { visit: '방문하기', join: '참여하기', follow: '팔로우하기', content: '콘텐츠보기' };
 export const snsTypes = {
   youtube: { label: '유튜브', action: '유튜브 구독하면', hosts: ['youtube.com', 'youtu.be'] },
@@ -41,8 +47,9 @@ export const snsTypes = {
   tiktok: { label: '틱톡', action: '틱톡 팔로우하면', hosts: ['tiktok.com'] },
   etc: { label: '기타 SNS', action: '팔로우하면', hosts: null }
 };
-export const actionText = offer => offer.type === 'follow' ? (snsTypes[offer.sns]?.action || '팔로우하면')
-  : { visit: '페이지 방문하면', content: '콘텐츠 보면', quiz: '퀴즈 맞히면', survey: '설문 참여하면', cpa: '미션 완료하면' }[offer.type];
+const liveActions = { notify: '라이브 알림 신청하면', enter: '라이브 입장하면', watch: '라이브 시청하면', quiz: '라이브 퀴즈 맞히면', coupon: '쿠폰 받으면', signup: '가입·구매 미션 완료하면' };
+export const actionText = offer => (offer.live_kind && liveActions[offer.live_kind]) || (offer.type === 'follow' ? (snsTypes[offer.sns]?.action || '팔로우하면')
+  : { visit: '페이지 방문하면', content: '콘텐츠 보면', quiz: '퀴즈 맞히면', survey: '설문 참여하면', cpa: '미션 완료하면', watch: '라이브 시청하면', mission: '미션 인증하면' }[offer.type]);
 
 const macros = ['click_id', 'user_id', 'offer_id', 'offer_type', 'event', 'transaction_id', 'price', 'reward', 'timestamp', 'signature'];
 const idPattern = /^[A-Za-z0-9._:~=+/-]{1,256}$/;
@@ -56,6 +63,8 @@ const cpaDays = 30;            // 미션형: 광고주 전환 통보를 받는 �
 const backoff = [60, 300, 1800, 7200, 21600]; // 포스트백 재시도 간격(초)
 const maxPostbackAttempts = backoff.length + 1;
 const assetSizes = { icon: [256, 256], banner: [1080, 540] };
+const closeGrace = 15 * 60_000; // 방송 종료(close_at) 뒤에도 이미 참여 중인 회원의 제출을 받는 시간
+const keywordGrace = 5 * 60_000; // 라이브 시청 키워드를 바꾼 뒤 이전 키워드도 인정하는 시간
 
 const hmac = (secret, text) => createHmac('sha256', secret).update(text).digest('hex');
 const sha = text => createHash('sha256').update(text).digest('hex');
@@ -136,7 +145,7 @@ export function setupOfferwall(ctx) {
     );
     CREATE TABLE IF NOT EXISTS ow_offers (
       id INTEGER PRIMARY KEY, slug TEXT NOT NULL UNIQUE, owner_id INTEGER REFERENCES users(id),
-      type TEXT NOT NULL CHECK (type IN ('visit','content','follow','quiz','survey','cpa')), category TEXT NOT NULL,
+      type TEXT NOT NULL CHECK (type IN ('visit','content','follow','quiz','survey','cpa','watch','mission')), category TEXT NOT NULL,
       title TEXT NOT NULL, brand TEXT NOT NULL, intro TEXT NOT NULL, badge TEXT NOT NULL DEFAULT '', target_url TEXT NOT NULL DEFAULT '',
       sns TEXT NOT NULL DEFAULT '', verify TEXT NOT NULL DEFAULT '', keyword TEXT NOT NULL DEFAULT '', guide TEXT NOT NULL DEFAULT '',
       questions TEXT NOT NULL DEFAULT '[]', steps TEXT NOT NULL DEFAULT '[]', review INTEGER NOT NULL DEFAULT 0,
@@ -179,14 +188,38 @@ export function setupOfferwall(ctx) {
       token TEXT PRIMARY KEY, network_id INTEGER NOT NULL REFERENCES ow_networks(id), network_user TEXT NOT NULL, expires INTEGER NOT NULL
     );
   `);
-  for (const [table, column, definition] of [['ow_networks', 'reward_rate', 'INTEGER NOT NULL DEFAULT 100'], ['ow_networks', 'point_unit', "TEXT NOT NULL DEFAULT 'P'"]]) {
+  // 라이브 유형(watch·mission)이 생기기 전 만든 표는 유형 제약을 넓혀 다시 만듭니다(데이터 유지).
+  {
+    const offersSql = get("SELECT sql FROM sqlite_master WHERE type='table' AND name='ow_offers'").sql;
+    if (!offersSql.includes("'watch'")) {
+      db.exec('PRAGMA foreign_keys = OFF');
+      try {
+        db.exec('BEGIN IMMEDIATE');
+        db.exec(offersSql.replace(/^CREATE TABLE "?ow_offers"?/, 'CREATE TABLE ow_offers_next').replace("'survey','cpa')", "'survey','cpa','watch','mission')"));
+        db.exec('INSERT INTO ow_offers_next SELECT * FROM ow_offers; DROP TABLE ow_offers; ALTER TABLE ow_offers_next RENAME TO ow_offers;');
+        if (all('PRAGMA foreign_key_check').length) throw new Error('foreign key check failed after ow_offers migration');
+        db.exec('COMMIT');
+      } catch (error) {
+        db.exec('ROLLBACK');
+        throw error;
+      } finally {
+        db.exec('PRAGMA foreign_keys = ON');
+      }
+    }
+  }
+  for (const [table, column, definition] of [['ow_networks', 'reward_rate', 'INTEGER NOT NULL DEFAULT 100'], ['ow_networks', 'point_unit', "TEXT NOT NULL DEFAULT 'P'"],
+    // 라이브 셀러 주문: 주문 번호·상품 종류, 방송 시간 기준 노출 구간(밀리초), 시청 확인 키워드 교체 기록
+    ['ow_offers', 'live_id', 'INTEGER'], ['ow_offers', 'live_kind', "TEXT NOT NULL DEFAULT ''"], ['ow_offers', 'open_at', 'INTEGER'], ['ow_offers', 'close_at', 'INTEGER'],
+    ['ow_offers', 'prev_keyword', "TEXT NOT NULL DEFAULT ''"], ['ow_offers', 'keyword_at', 'INTEGER']]) {
     if (!all(`PRAGMA table_info(${table})`).some(item => item.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
+  db.exec('CREATE INDEX IF NOT EXISTS ow_offers_live ON ow_offers(live_id)');
   run("INSERT OR IGNORE INTO settings VALUES ('ow_share', '6000')");
+  run("INSERT OR IGNORE INTO settings VALUES ('live_share', '6500')");
   for (const [type, item] of Object.entries(offerTypes)) run('INSERT OR IGNORE INTO settings VALUES (?, ?)', `ow_cost_${type}`, String(item.cost));
   run("UPDATE ow_postbacks SET status='queued' WHERE status='sending'");
 
-  const rates = () => ({ share: Number(setting('ow_share')), costs: Object.fromEntries(Object.keys(offerTypes).map(type => [type, Number(setting(`ow_cost_${type}`))])) });
+  const rates = () => ({ share: Number(setting('ow_share')), costs: Object.fromEntries(generalTypes.map(type => [type, Number(setting(`ow_cost_${type}`))])) });
 
   /* ---------- 비밀키 암호화 저장 ---------- */
   let cachedKey;
@@ -326,7 +359,7 @@ export function setupOfferwall(ctx) {
   function saveRates(user, body) {
     const share = Math.round(Number(String(body.share ?? '').trim()) * 100);
     assert(/^\d{1,3}(\.\d{1,2})?$/.test(String(body.share ?? '').trim()) && share >= 0 && share <= 10000, '매체 배분율은 0~100% 사이로 입력해 주세요.');
-    const costs = Object.fromEntries(Object.keys(offerTypes).map(type => [type, int(body[`cost_${type}`], `${offerTypes[type].label} 단가`, 1, 1000000)]));
+    const costs = Object.fromEntries(generalTypes.map(type => [type, int(body[`cost_${type}`], `${offerTypes[type].label} 단가`, 1, 1000000)]));
     return transaction(() => {
       run("UPDATE settings SET value=? WHERE key='ow_share'", String(share));
       for (const [type, cost] of Object.entries(costs)) run('UPDATE settings SET value=? WHERE key=?', String(cost), `ow_cost_${type}`);
@@ -411,6 +444,17 @@ export function setupOfferwall(ctx) {
       icon: assetFor(user, body.icon_id, 'icon'), banner: assetFor(user, body.banner_id, 'banner')
     };
     if (type === 'visit' || type === 'content' || type === 'cpa') f.targetUrl = httpsUrl(body.target_url, type === 'cpa' ? '참여 주소' : '방문 주소');
+    // 라이브 퀴즈는 정답을 맞히면 방송 화면으로 다시 보냅니다.
+    if (type === 'quiz' && body.target_url) f.targetUrl = httpsUrl(body.target_url, '방송 주소');
+    if (type === 'watch') {
+      f.targetUrl = httpsUrl(body.target_url, '방송 주소');
+      f.verify = 'keyword';
+      f.keyword = str(body.keyword, '시청 확인 키워드', 20, 2);
+    }
+    if (type === 'mission') {
+      f.targetUrl = httpsUrl(body.target_url, '참여 주소');
+      f.verify = 'screenshot';
+    }
     if (type === 'follow') {
       assert(Object.hasOwn(snsTypes, body.sns), 'SNS 종류를 선택해 주세요.');
       f.sns = body.sns;
@@ -423,14 +467,15 @@ export function setupOfferwall(ctx) {
     if (type === 'survey') f.review = flag(body.review);
     if (type === 'cpa') f.steps = stepsFrom(body, owned ? costs.cpa : 0);
     // 단가는 주문 시점 기준으로 고정합니다. 미션형은 단계 단가 합계입니다.
-    f.cost = type === 'cpa' ? f.steps.reduce((sum, step) => sum + step.cost, 0) : existing ? existing.cost : owned ? costs[type] : 0;
+    f.cost = type === 'cpa' ? f.steps.reduce((sum, step) => sum + step.cost, 0) : existing ? existing.cost : owned ? costs[type] ?? Number(setting(`ow_cost_${type}`)) : 0;
     return f;
   }
 
   // 매체별 공급 단가: 광고 단가 × 매체 배분율, 매체 리워드: 단가 × 매체 환산율
   function place(offer, network, override) {
     const base = offer.cost || (offer.type === 'cpa' ? 0 : Number(setting(`ow_cost_${offer.type}`)));
-    const price = override?.price ?? Math.floor(base * Number(setting('ow_share')) / 10000);
+    // 라이브 광고는 방송 시간에만 노출돼 매체 노출 기회가 짧으므로 별도 배분율(live_share)을 씁니다.
+    const price = override?.price ?? Math.floor(base * Number(setting(offer.live_id ? 'live_share' : 'ow_share')) / 10000);
     const reward = override?.reward ?? Math.floor(price * network.reward_rate / 100);
     run(`INSERT INTO ow_placements(offer_id,network_id,price,reward,status) VALUES (?,?,?,?,?)
       ON CONFLICT(offer_id,network_id) DO UPDATE SET price=excluded.price, reward=excluded.reward, status=excluded.status`, offer.id, network.id, price, reward, override?.status || 'active');
@@ -449,8 +494,22 @@ export function setupOfferwall(ctx) {
   const offerColumns = f => [f.type, f.category, f.title, f.brand, f.intro, f.badge, f.targetUrl, f.sns, f.verify, f.keyword, f.guide, JSON.stringify(f.questions), JSON.stringify(f.steps),
     f.review, f.attempts, f.minDwell, f.repeat, f.cost, f.goal, f.cap, f.ipLimit, f.start, f.end, f.icon, f.banner];
 
+  // 광고 1건을 저장합니다(트랜잭션 안에서 호출). 광고 계정이면 예산을 잔액에서 배정합니다.
+  function insertOffer(user, f, { owned, key = null, live = null, status }) {
+    const budget = owned ? f.cost * f.goal : 0;
+    const slug = randomBytes(9).toString('base64url');
+    const convSecret = f.type === 'cpa' ? newSecret() : null;
+    const id = Number(run(`INSERT INTO ow_offers(slug,owner_id,type,category,title,brand,intro,badge,target_url,sns,verify,keyword,guide,questions,steps,review,attempts,min_dwell,repeat,cost,goal,daily_cap,
+      ip_daily_limit,start_date,end_date,icon_id,banner_id,status,budget,conv_secret_enc,created_by,created,request_key,live_id,live_kind,open_at,close_at)
+      VALUES (?,?,${Array(25).fill('?').join(',')},?,?,?,?,?,?,?,?,?,?)`, slug, owned ? user.id : null, ...offerColumns(f), status || (owned ? 'review' : 'draft'), budget,
+      convSecret ? seal(convSecret) : null, user.id, now(), key, live?.id ?? null, live?.kind ?? '', live?.openAt ?? null, live?.closeAt ?? null).lastInsertRowid);
+    if (owned && budget) entry(user.id, 'credit', -budget, 'ow_reserve', id);
+    return { id, slug, budget, convSecret };
+  }
+
   function createOffer(user, body) {
     assert(isAdmin(user) || partnerRoles.includes(user.role), '이 기능을 사용할 권한이 없습니다.', 403);
+    assert(!offerTypes[body.type]?.live, '라이브 광고는 라이브 셀러 광고 메뉴에서 주문해 주세요.');
     const f = offerFields(user, body);
     const owned = !isAdmin(user);
     const key = owned ? str(body.key, '요청 키', 64) : null;
@@ -462,17 +521,11 @@ export function setupOfferwall(ctx) {
           return { id: existing.id, slug: existing.slug };
         }
       }
-      const budget = owned ? f.cost * f.goal : 0;
-      if (owned) assert(balance(user.id, 'credit') >= budget, `광고 잔액이 부족합니다. 예산 ${won(budget)}이 필요해요.`, 409);
-      const slug = randomBytes(9).toString('base64url');
-      const convSecret = f.type === 'cpa' ? newSecret() : null;
-      const id = Number(run(`INSERT INTO ow_offers(slug,owner_id,type,category,title,brand,intro,badge,target_url,sns,verify,keyword,guide,questions,steps,review,attempts,min_dwell,repeat,cost,goal,daily_cap,
-        ip_daily_limit,start_date,end_date,icon_id,banner_id,status,budget,conv_secret_enc,created_by,created,request_key)
-        VALUES (?,?,${Array(25).fill('?').join(',')},?,?,?,?,?,?)`, slug, owned ? user.id : null, ...offerColumns(f), owned ? 'review' : 'draft', budget,
-        convSecret ? seal(convSecret) : null, user.id, now(), key).lastInsertRowid);
+      const needed = owned ? f.cost * f.goal : 0;
+      if (owned) assert(balance(user.id, 'credit') >= needed, `광고 잔액이 부족합니다. 예산 ${won(needed)}이 필요해요.`, 409);
+      const { id, slug, budget, convSecret } = insertOffer(user, f, { owned, key });
       const offer = get('SELECT * FROM ow_offers WHERE id=?', id);
-      if (owned) entry(user.id, 'credit', -budget, 'ow_reserve', id);
-      else {
+      if (!owned) {
         for (const network of all('SELECT * FROM ow_networks')) place(offer, network);
         savePlacements(offer, body);
       }
@@ -491,6 +544,7 @@ export function setupOfferwall(ctx) {
     const id = int(body.id, '광고 번호', 1, 1e9);
     return transaction(() => {
       const offer = editableOffer(user, id);
+      assert(!offer.live_id || isAdmin(user), '라이브 광고는 라이브 셀러 광고 메뉴에서 관리해 주세요.', 409);
       assert(!['closed', 'rejected', 'canceled'].includes(offer.status), '끝난 광고는 고칠 수 없습니다.', 409);
       assert(isAdmin(user) || offer.status === 'review', '심사 대기 중일 때만 고칠 수 있어요. 진행 중인 광고는 연장·증액을 이용하세요.', 409);
       const f = offerFields(user, { ...body, goal: offer.owner_id && !isAdmin(user) ? offer.goal : body.goal }, offer);
@@ -520,15 +574,15 @@ export function setupOfferwall(ctx) {
   const spentOf = id => get('SELECT COALESCE(SUM(v.cost),0) AS total FROM ow_conversions v JOIN ow_clicks c ON c.id=v.click_ref WHERE c.offer_id=?', id).total;
 
   // 광고를 끝내고 광고 계정에 남은 예산을 돌려줍니다.
-  function finish(offer, status, reason, actor = null) {
+  function finish(offer, status, reason, actor = null, quiet = false) {
     run('UPDATE ow_offers SET status=?, reason=?, updated=? WHERE id=?', status, reason, now(), offer.id);
     let returned = 0;
     if (offer.owner_id) {
       returned = Math.max(0, offer.budget - spentOf(offer.id));
       if (returned) entry(offer.owner_id, 'credit', returned, 'ow_release', offer.id);
-      if (actor !== offer.owner_id) {
+      if (actor !== offer.owner_id && !quiet) {
         notify(offer.owner_id, 'offerwall', `오퍼월 광고 ‘${offer.title}’ ${status === 'rejected' ? '심사 반려' : '종료'}`,
-          `${reason}${returned ? ` · 남은 예산 ${won(returned)}을 잔액으로 돌려드렸어요.` : ''}`, '/manage?tab=owads');
+          `${reason}${returned ? ` · 남은 예산 ${won(returned)}을 잔액으로 돌려드렸어요.` : ''}`, offer.live_id ? '/manage?tab=liveads' : '/manage?tab=owads');
       }
     }
     audit(actor, status === 'rejected' ? '오퍼월 광고 반려' : status === 'canceled' ? '오퍼월 광고 취소' : '오퍼월 광고 종료', `ow-offer:${offer.id}`, `${reason}${returned ? ` · 반환 ${won(returned)}` : ''}`);
@@ -538,12 +592,18 @@ export function setupOfferwall(ctx) {
   const adminPause = '운영자 일시중지';
   function offerStatus(user, body) {
     const id = int(body.id, '광고 번호', 1, 1e9);
+    return transaction(() => changeStatus(user, editableOffer(user, id), body.action, body.reason));
+  }
+
+  // 상태 전환(트랜잭션 안에서 호출). quiet이면 광고 계정 알림을 보내지 않습니다(라이브 주문은 주문 단위로 알립니다).
+  function changeStatus(user, offer, action, givenReason, { quiet = false } = {}) {
+    const id = offer.id;
     const admin = isAdmin(user);
     const transitions = admin
       ? { review: { approve: 'active', reject: 'rejected' }, draft: { activate: 'active', close: 'closed' }, active: { pause: 'paused', close: 'closed' }, paused: { activate: 'active', close: 'closed' } }
       : { review: { cancel: 'canceled' }, active: { pause: 'paused', close: 'closed' }, paused: { activate: 'active', close: 'closed' } };
-    return transaction(() => {
-      const offer = editableOffer(user, id);
+    {
+      const body = { action, reason: givenReason };
       const next = transitions[offer.status]?.[body.action];
       assert(next, '현재 상태에서 처리할 수 없습니다.', 409);
       if (!admin && body.action === 'activate') assert(offer.reason !== adminPause, '운영팀이 중지한 광고입니다. 문의하기로 재개를 요청해 주세요.', 409);
@@ -557,17 +617,17 @@ export function setupOfferwall(ctx) {
       if (next === 'closed') assert(!get("SELECT 1 FROM ow_clicks WHERE offer_id=? AND status='pending'", id), '검수 대기 중인 참여가 있어 종료할 수 없습니다.', 409);
       if (['closed', 'rejected', 'canceled'].includes(next)) {
         const reason = next === 'rejected' ? `심사 반려 · ${str(body.reason, '반려 사유', 200)}` : next === 'canceled' ? '광고주 취소' : admin ? '운영자 종료' : '광고주 종료';
-        return { returned: finish(offer, next, reason, user.id) };
+        return { returned: finish(offer, next, reason, user.id, quiet) };
       }
       const reason = next === 'paused' ? (admin ? adminPause : '광고주 일시중지') : '';
       run('UPDATE ow_offers SET status=?, reason=?, updated=? WHERE id=?', next, reason, now(), id);
       audit(user.id, body.action === 'approve' ? '오퍼월 광고 승인' : '오퍼월 광고 상태 변경', `ow-offer:${id}`, next);
-      if (admin && offer.owner_id) {
+      if (admin && offer.owner_id && !quiet) {
         const message = { approve: ['심사 승인', `${offer.start_date}부터 오퍼월 매체에 공급합니다.`], pause: ['운영팀 일시중지', '자세한 내용은 문의하기로 확인해 주세요.'], activate: ['공급 재개', '광고가 다시 매체에 공급됩니다.'] }[body.action];
         if (message) notify(offer.owner_id, 'offerwall', `오퍼월 광고 ‘${offer.title}’ ${message[0]}`, message[1], '/manage?tab=owads');
       }
       return {};
-    });
+    }
   }
 
   function extendOffer(user, body) {
@@ -575,6 +635,7 @@ export function setupOfferwall(ctx) {
     return transaction(() => {
       const offer = editableOffer(user, id);
       assert(offer.owner_id === user.id, '광고 계정의 광고만 연장·증액할 수 있습니다.', 403);
+      assert(!offer.live_id, '라이브 광고는 방송 시간에 맞춰 집행돼 연장·증액할 수 없어요.', 409);
       assert(['active', 'paused'].includes(offer.status), '진행 중이거나 일시중지된 광고만 연장·증액할 수 있습니다.', 409);
       const goal = int(body.goal, '목표 완료 수', offer.goal, 1000000);
       const end = date(body.end);
@@ -608,8 +669,14 @@ export function setupOfferwall(ctx) {
     const today = dateKst();
     const due = all(`SELECT o.* FROM ow_offers o WHERE o.status IN ('active','paused','draft','review') AND o.end_date<?
       AND NOT EXISTS (SELECT 1 FROM ow_clicks WHERE offer_id=o.id AND status='pending')`, today);
-    if (!due.length) return;
-    transaction(() => { for (const offer of due) finish(offer, offer.status === 'review' ? 'canceled' : 'closed', '집행 기간 종료'); });
+    // 라이브 광고는 방송이 끝나고(close_at) 제출 유예 시간이 지나면 바로 정리합니다.
+    const aired = all(`SELECT o.* FROM ow_offers o WHERE o.status IN ('active','paused','review') AND o.close_at IS NOT NULL AND o.close_at<? AND o.end_date>=?
+      AND NOT EXISTS (SELECT 1 FROM ow_clicks WHERE offer_id=o.id AND status='pending')`, Date.now() - closeGrace, today);
+    if (!due.length && !aired.length) return;
+    transaction(() => {
+      for (const offer of due) finish(offer, offer.status === 'review' ? 'canceled' : 'closed', '집행 기간 종료');
+      for (const offer of aired) finish(offer, offer.status === 'review' ? 'canceled' : 'closed', offer.status === 'review' ? '방송 전 승인되지 않음' : '방송 종료', null, true);
+    });
   }
   setInterval(() => { try { sweep(); } catch (error) { console.error('offerwall sweep', error); } }, 60_000).unref();
 
@@ -794,7 +861,7 @@ export function setupOfferwall(ctx) {
   function adminOverview(user, params, req) {
     const today = dayStart();
     const networks = all('SELECT * FROM ow_networks ORDER BY id').map(networkView);
-    const offers = all(`SELECT o.*, u.name AS owner, ${offerStats} FROM ow_offers o LEFT JOIN users u ON u.id=o.owner_id
+    const offers = all(`SELECT o.*, u.name AS owner, ${offerStats} FROM ow_offers o LEFT JOIN users u ON u.id=o.owner_id WHERE o.live_id IS NULL
       ORDER BY (o.status='review') DESC, (o.status='active') DESC, o.id DESC`, today).map(offer => offerView(offer, true));
     const status = ['started', 'pending', 'completed', 'failed', 'rejected', 'expired'].includes(params.get('status')) ? params.get('status') : '';
     const offerId = Number(params.get('offer')) || 0;
@@ -809,23 +876,23 @@ export function setupOfferwall(ctx) {
       .map(({ questions, answers, ...click }) => ({ ...click, prompts: JSON.parse(questions).map(q => q.prompt), answers: answers ? JSON.parse(answers) : null,
         postbacks: all(`SELECT p.id, p.status, p.attempts, p.last_code, p.last_error, p.sent, v.step FROM ow_postbacks p JOIN ow_conversions v ON v.id=p.conversion_id WHERE v.click_ref=? ORDER BY v.id`, click.id) }));
     const counts = {
-      review: get("SELECT COUNT(*) AS total FROM ow_offers WHERE status='review'").total,
+      review: get("SELECT COUNT(*) AS total FROM ow_offers WHERE status='review' AND live_id IS NULL").total,
       pending: get("SELECT COUNT(*) AS total FROM ow_clicks WHERE status='pending'").total,
       failedPostbacks: get("SELECT COUNT(*) AS total FROM ow_postbacks WHERE status='failed'").total,
       queuedPostbacks: get("SELECT COUNT(*) AS total FROM ow_postbacks WHERE status IN ('queued','sending')").total,
       completedToday: get('SELECT COUNT(*) AS total FROM ow_conversions WHERE created>=?', today).total,
       revenueToday: get('SELECT COALESCE(SUM(cost-price),0) AS total FROM ow_conversions WHERE created>=?', today).total
     };
-    return { origin: req.site.origin, networks, offers, clicks, page, pages, total, counts, presets, macros, rates: rates(), types: offerTypes, categories, sns: snsTypes };
+    return { origin: req.site.origin, networks, offers, clicks, page, pages, total, counts, presets, macros, rates: rates(), types: generalTypes.reduce((map, type) => ({ ...map, [type]: offerTypes[type] }), {}), categories, sns: snsTypes };
   }
 
   function ownerOverview(user) {
     assert(user, '로그인이 필요합니다.', 401);
     assert(partnerRoles.includes(user.role), '이 기능을 사용할 권한이 없습니다.', 403);
-    const offers = all(`SELECT o.*, ${offerStats} FROM ow_offers o WHERE o.owner_id=? ORDER BY o.id DESC`, dayStart(), user.id).map(offer => offerView(offer, false));
+    const offers = all(`SELECT o.*, ${offerStats} FROM ow_offers o WHERE o.owner_id=? AND o.live_id IS NULL ORDER BY o.id DESC`, dayStart(), user.id).map(offer => offerView(offer, false));
     const trend = all(`SELECT date(v.created,'+9 hours') AS day, COUNT(*) AS total, SUM(v.cost) AS spend FROM ow_conversions v JOIN ow_clicks c ON c.id=v.click_ref
       JOIN ow_offers o ON o.id=c.offer_id WHERE o.owner_id=? AND v.created>=? GROUP BY day`, user.id, dayStart(new Date(Date.now() - 13 * 86_400_000).toISOString().slice(0, 10)));
-    return { offers, trend, rates: rates(), types: offerTypes, categories, sns: snsTypes, balance: balance(user.id, 'credit'), networks: get("SELECT COUNT(*) AS total FROM ow_networks WHERE status='active'").total };
+    return { offers, trend, rates: rates(), types: generalTypes.reduce((map, type) => ({ ...map, [type]: offerTypes[type] }), {}), categories, sns: snsTypes, balance: balance(user.id, 'credit'), networks: get("SELECT COUNT(*) AS total FROM ow_networks WHERE status='active'").total };
   }
 
   async function proofImage(req, res, user, url) {
@@ -852,7 +919,9 @@ export function setupOfferwall(ctx) {
   }
 
   const liveOffers = network => all(`SELECT o.*, p.price, p.reward FROM ow_offers o JOIN ow_placements p ON p.offer_id=o.id
-    WHERE p.network_id=? AND p.status='active' AND o.status='active' AND o.start_date<=? AND o.end_date>=? ORDER BY o.category, o.id DESC`, network.id, dateKst(), dateKst());
+    WHERE p.network_id=? AND p.status='active' AND o.status='active' AND o.start_date<=? AND o.end_date>=? AND (o.open_at IS NULL OR o.open_at<=?) AND (o.close_at IS NULL OR o.close_at>?)
+    ORDER BY (o.live_id IS NOT NULL) DESC, o.category, o.id DESC`, network.id, dateKst(), dateKst(), Date.now(), Date.now());
+  const iso = ms => ms ? new Date(ms).toISOString() : null;
   const imageUrl = (origin, id) => id ? `${origin}/ow/img/${id}` : null;
 
   function feedItem(origin, network, offer) {
@@ -863,10 +932,14 @@ export function setupOfferwall(ctx) {
       steps: steps.map(step => ({ event: step.code, label: step.label, reward: Math.floor(offer.reward * step.cost / (steps.reduce((s, x) => s + x.cost, 0) || 1)) })),
       questions: offer.type === 'quiz' || offer.type === 'survey' ? JSON.parse(offer.questions).length : 0,
       icon_url: imageUrl(origin, offer.icon_id), banner_url: imageUrl(origin, offer.banner_id), start_date: offer.start_date, end_date: offer.end_date,
+      // 라이브 광고: 노출 구간이 끝나면(closes_at) 매체도 바로 내려 주세요. 이후 랜딩은 '종료' 안내가 나오고 집행되지 않습니다.
+      opens_at: iso(offer.open_at), closes_at: iso(offer.close_at), live: offer.live_id ? liveInfo(offer) : null,
       landing_url: `${origin}/ow/${offer.slug}?nw=${network.code}&${network.click_param}={CLICK_ID}&${network.user_param}={USER_ID}${network.sign_landing ? '&ts={TS}&sig={SIG}' : ''}`,
       signature_base: network.sign_landing ? `${offer.slug}.{CLICK_ID}.{USER_ID}.{TS}` : null };
   }
 
+  // 라이브 주문 정보(방송 플랫폼·시간)는 live.mjs가 채웁니다.
+  let liveInfo = offer => ({ kind: offer.live_kind });
   function feed(req, network) {
     const origin = req.site.origin;
     return { network: network.code, generated: now(), point_unit: network.point_unit,
@@ -924,7 +997,9 @@ export function setupOfferwall(ctx) {
   // 안내 문구는 코드로만 넘겨, 주소에 임의 문구를 넣어 애즈폼 화면처럼 꾸미지 못하게 합니다.
   const landingError = (res, code) => redirect(res, `/ow/expired?r=${code}`);
   const period = offer => offer.repeat === 'daily' ? dateKst() : 'once';
-  const liveFor = (offer, network) => offer.status === 'active' && offer.start_date <= dateKst() && offer.end_date >= dateKst() && network.status === 'active' &&
+  // grace: 라이브 광고 노출 구간이 끝난 뒤에도 이미 참여 중인 회원의 제출을 받는 시간(밀리초)
+  const liveFor = (offer, network, grace = 0) => offer.status === 'active' && offer.start_date <= dateKst() && offer.end_date >= dateKst() && network.status === 'active' &&
+    (offer.open_at === null || offer.open_at <= Date.now()) && (offer.close_at === null || offer.close_at + grace > Date.now()) &&
     get("SELECT * FROM ow_placements WHERE offer_id=? AND network_id=? AND status='active'", offer.id, network.id);
 
   // 클릭을 만들거나, 이미 있는 참여를 이어서 할 수 있게 새 세션 토큰을 발급합니다.
@@ -1011,7 +1086,8 @@ export function setupOfferwall(ctx) {
   function publicOffer(offer) {
     const steps = JSON.parse(offer.steps);
     return { slug: offer.slug, type: offer.type, category: offer.category, title: offer.title, brand: offer.brand, intro: offer.intro, badge: offer.badge, guide: offer.guide,
-      action: actionText(offer), sns: offer.sns, snsLabel: snsTypes[offer.sns]?.label || '', verify: offer.verify, target: ['visit', 'content', 'follow'].includes(offer.type) ? offer.target_url : '',
+      action: actionText(offer), sns: offer.sns, snsLabel: snsTypes[offer.sns]?.label || '', verify: offer.verify, target: offer.type === 'cpa' ? '' : offer.target_url,
+      live: offer.live_kind || '', closesAt: offer.close_at,
       icon: offer.icon_id ? `/ow/img/${offer.icon_id}` : null, banner: offer.banner_id ? `/ow/img/${offer.banner_id}` : null, repeat: offer.repeat,
       questions: JSON.parse(offer.questions).map(({ prompt, choices }) => ({ prompt, choices: choices || [] })), steps: steps.map(({ code, label, cost }) => ({ code, label, cost })),
       attempts: offer.attempts, minDwell: offer.min_dwell };
@@ -1053,8 +1129,8 @@ export function setupOfferwall(ctx) {
         const { correct } = grade(offer, body);
         return { preview: true, status: offer.type === 'survey' ? (offer.review ? 'pending' : 'completed') : correct ? 'completed' : 'failed' };
       }
-      if (offer.type === 'follow' && offer.verify === 'keyword') return { preview: true, status: normalize(body.keyword) === normalize(offer.keyword) ? 'completed' : 'retry', triesLeft: 4 };
-      return { preview: true, status: offer.type === 'cpa' ? 'started' : 'completed', url: offer.type === 'cpa' ? null : offer.target_url };
+      if (['follow', 'watch'].includes(offer.type) && offer.verify === 'keyword') return { preview: true, status: normalize(body.keyword) === normalize(offer.keyword) ? 'completed' : 'retry', triesLeft: 4 };
+      return { preview: true, status: offer.type === 'cpa' ? 'started' : 'completed', url: offer.type === 'cpa' ? null : offer.target_url || null };
     }
     const token = cookieValue(req, offerCookie(offer.slug));
     assert(token, '참여 정보를 찾을 수 없어요. 리워드 앱에서 다시 들어와 주세요.', 401);
@@ -1067,29 +1143,33 @@ export function setupOfferwall(ctx) {
       if (offer.type === 'cpa') {
         // 미션형은 광고주 페이지로 보내고, 완료는 광고주 서버의 전환 통보로 확인합니다.
         assert(click.status === 'started' && click.expires > Date.now(), '참여 기간이 지났어요. 리워드 앱에서 다시 들어와 주세요.', 409);
-        if (!liveFor(fresh, network)) return { status: 'closed' };
+        if (!liveFor(fresh, network, closeGrace)) return { status: 'closed' };
         const target = new URL(offer.target_url);
         target.searchParams.set('adsform_click', click.ref);
         return { status: 'started', url: target.href };
       }
-      if (click.status !== 'started') return { status: click.status, url: ['visit', 'content'].includes(offer.type) ? offer.target_url : undefined };
+      assert(offer.type !== 'mission', '인증 화면을 올려 주세요.');
+      const revisit = ['visit', 'content', 'watch'].includes(offer.type) || (offer.type === 'quiz' && offer.target_url) ? offer.target_url : undefined;
+      if (click.status !== 'started') return { status: click.status, url: revisit };
       if (click.expires <= Date.now()) {
         run("UPDATE ow_clicks SET status='expired', finished=? WHERE id=?", now(), click.id);
         return { status: 'expired' };
       }
-      assert(Date.now() - click.opened >= offer.min_dwell * 1000, `내용을 충분히 확인한 뒤 진행해 주세요. (최소 ${offer.min_dwell}초)`, 409);
-      if (!liveFor(fresh, network)) return { status: 'closed' };
+      assert(Date.now() - click.opened >= offer.min_dwell * 1000, offer.type === 'watch' ? `방송을 ${Math.ceil(offer.min_dwell / 60)}분 이상 시청한 뒤 키워드를 입력해 주세요.` : `내용을 충분히 확인한 뒤 진행해 주세요. (최소 ${offer.min_dwell}초)`, 409);
+      if (!liveFor(fresh, network, closeGrace)) return { status: 'closed' };
       const tries = click.tries + 1;
       let answers = null;
       let correct = true;
       let status = 'completed';
       if (offer.type === 'quiz' || offer.type === 'survey') ({ answers, correct } = grade(offer, body));
-      if (offer.type === 'follow') {
+      if (offer.type === 'follow' || offer.type === 'watch') {
         assert(offer.verify === 'keyword', '인증 화면을 올려 주세요.');
         answers = [str(body.keyword, '인증 키워드', 40)];
-        correct = normalize(answers[0]) === normalize(offer.keyword);
+        // 라이브 시청 키워드는 방송 중에 바뀔 수 있어, 바꾼 직후 몇 분은 이전 키워드도 인정합니다.
+        const accepted = [fresh.keyword, fresh.prev_keyword && fresh.keyword_at > Date.now() - keywordGrace ? fresh.prev_keyword : ''].filter(Boolean);
+        correct = accepted.some(word => normalize(answers[0]) === normalize(word));
       }
-      const maxTries = offer.type === 'quiz' ? offer.attempts : offer.type === 'follow' ? 5 : 1;
+      const maxTries = offer.type === 'quiz' ? offer.attempts : ['follow', 'watch'].includes(offer.type) ? 5 : 1;
       if (!correct) {
         const final = tries >= maxTries;
         run('UPDATE ow_clicks SET tries=?, status=?, answers=?, reason=?, finished=? WHERE id=?', tries, final ? 'failed' : 'started', JSON.stringify(answers),
@@ -1109,13 +1189,13 @@ export function setupOfferwall(ctx) {
       }
       run('UPDATE ow_clicks SET tries=?, status=?, answers=?, finished=? WHERE id=?', tries, status, answers ? JSON.stringify(answers) : null, now(), click.id);
       closeIfDone(fresh);
-      return { status, url: ['visit', 'content'].includes(offer.type) ? offer.target_url : undefined };
+      return { status, url: revisit };
     });
   }
 
   // 팔로우 인증 화면: 브라우저에서 JPG로 다시 그린 이미지만 받아 운영자가 검수합니다.
   async function proof(req, url, offer) {
-    assert(offer.type === 'follow' && offer.verify === 'screenshot', '인증 화면을 받지 않는 광고입니다.');
+    assert((offer.type === 'follow' && offer.verify === 'screenshot') || offer.type === 'mission', '인증 화면을 받지 않는 광고입니다.');
     if (canPreview(req, url, offer)) return { preview: true, status: 'pending' };
     const token = cookieValue(req, offerCookie(offer.slug));
     assert(token, '참여 정보를 찾을 수 없어요. 리워드 앱에서 다시 들어와 주세요.', 401);
@@ -1129,9 +1209,9 @@ export function setupOfferwall(ctx) {
       assert(click, '참여 정보를 찾을 수 없어요.', 401);
       if (click.status !== 'started') return { status: click.status };
       assert(click.expires > Date.now(), '참여 시간이 지났어요. 리워드 앱에서 다시 들어와 주세요.', 409);
-      assert(Date.now() - click.opened >= offer.min_dwell * 1000, '채널을 확인한 뒤 진행해 주세요.', 409);
+      assert(Date.now() - click.opened >= offer.min_dwell * 1000, offer.type === 'mission' ? '안내한 페이지에서 미션을 마친 뒤 올려 주세요.' : '채널을 확인한 뒤 진행해 주세요.', 409);
       const fresh = get('SELECT * FROM ow_offers WHERE id=?', offer.id);
-      if (!liveFor(fresh, get('SELECT * FROM ow_networks WHERE id=?', click.network_id))) return { status: 'closed' };
+      if (!liveFor(fresh, get('SELECT * FROM ow_networks WHERE id=?', click.network_id), closeGrace)) return { status: 'closed' };
       if (!capacity(fresh)) return { status: 'full' };
       const asset = Number(run("INSERT INTO ow_assets(owner_id,kind,data,width,height,created) VALUES (NULL,'proof',?,?,?,?)", image, size.width, size.height, now()).lastInsertRowid);
       run("UPDATE ow_clicks SET status='pending', proof_id=?, tries=tries+1, finished=? WHERE id=?", asset, now(), click.id);
@@ -1348,6 +1428,11 @@ export function setupOfferwall(ctx) {
     },
     counts: () => ({ review: get("SELECT COUNT(*) AS total FROM ow_offers WHERE status='review'").total, pending: get("SELECT COUNT(*) AS total FROM ow_clicks WHERE status='pending'").total }),
     hasLive: userId => Boolean(get("SELECT 1 FROM ow_offers WHERE owner_id=? AND status IN ('review','active','paused')", userId)),
-    drain
+    drain,
+    // 라이브 셀러 주문(live.mjs)이 쓰는 내부 기능. 모두 트랜잭션 안에서 호출합니다.
+    internal: {
+      offerFields, insertOffer, changeStatus, finish, offerView, offerStats, capacity, httpsUrl, isAdmin, partnerRoles, stepsFrom, sweep,
+      setLiveInfo: fn => { liveInfo = fn; }
+    }
   };
 }

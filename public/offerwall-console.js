@@ -5,7 +5,7 @@ export function setupOfferwallConsole(h) {
   const { api, esc, format, field, textarea, select, btn, empty, panelHead, icon, modal, dialog, dateTime, day, pager, showToast, decision } = h;
   let data = null;
   let mine = null;
-  const typeName = { visit: '방문하기', content: '콘텐츠보기', follow: '팔로우하기', quiz: '퀴즈', survey: '설문', cpa: '미션형(CPA)' };
+  const typeName = { visit: '방문하기', content: '콘텐츠보기', follow: '팔로우하기', quiz: '퀴즈', survey: '설문', cpa: '미션형(CPA)', watch: '라이브 시청', mission: '인증 미션' };
   const typeIntro = {
     visit: '광고 페이지 방문 시 적립 · 하루 1회 반복', content: '콘텐츠(게임·운세·상식 등) 페이지 방문 · 하루 1회', follow: '유튜브·인스타그램 등 구독·팔로우 인증',
     quiz: '광고 내용을 읽고 퀴즈 정답 시 적립', survey: '설문 응답 수집 · 검수 후 적립 선택', cpa: '앱 설치·가입·구매 등 단계별 미션 · 광고주 서버 전환 통보'
@@ -87,9 +87,9 @@ export function setupOfferwallConsole(h) {
     const filters = [['', '전체'], ['pending', '검수 대기'], ['completed', '완료'], ['started', '참여 중'], ['failed', '실패'], ['rejected', '반려'], ['expired', '만료']];
     return `<div class="toolbar"><div class="tabs">${filters.map(([key, label]) => `<a href="${link({ status: key, page: '' })}" class="${key === status ? 'on' : ''}">${label}</a>`).join('')}</div>
       ${offerId ? `<a class="btn quiet small" href="${link({ offer: '', page: '' })}">광고 필터 해제 · #${esc(offerId)}</a>` : ''}</div>
-      ${pending.length ? `<h3 class="ow-sub">검수 대기 (설문 · 팔로우 인증)</h3><div class="order-grid">${pending.map(click => `<article class="panel order-card"><div class="row-top"><span class="eyebrow">참여 #${click.id} · ${dateTime(click.finished)}</span>${tag(clickStatus.pending)}</div>
+      ${pending.length ? `<h3 class="ow-sub">검수 대기 (설문 · 팔로우 인증 · 라이브 알림·쿠폰 인증)</h3><div class="order-grid">${pending.map(click => `<article class="panel order-card"><div class="row-top"><span class="eyebrow">참여 #${click.id} · ${dateTime(click.finished)}</span>${tag(clickStatus.pending)}</div>
         <h3>${esc(click.title)}</h3><p>${esc(click.network)} · 회원 ${esc(click.network_user)}</p>
-        ${click.proof_id ? `<a href="/api/offerwall/proof?id=${click.proof_id}" target="_blank" rel="noopener"><img class="ow-proof" src="/api/offerwall/proof?id=${click.proof_id}" alt="팔로우 인증 화면"></a>` : ''}
+        ${click.proof_id ? `<a href="/api/offerwall/proof?id=${click.proof_id}" target="_blank" rel="noopener"><img class="ow-proof" src="/api/offerwall/proof?id=${click.proof_id}" alt="인증 화면"></a>` : ''}
         ${click.answers ? click.prompts.map((prompt, i) => `<p class="review-question"><small>Q${i + 1}</small> ${esc(prompt)}</p><blockquote>${esc(click.answers[i] ?? '')}</blockquote>`).join('') : ''}
         <p class="form-hint">승인하면 ${esc(click.network)}에 완료 포스트백을 보내 회원에게 ${format(click.reward)}${esc(click.point_unit)}이 지급됩니다.</p>
         <div class="actions">${decision('offerwall/click/review', click.id, 'approve')}${decision('offerwall/click/review', click.id, 'reject')}</div></article>`).join('')}</div>` : ''}

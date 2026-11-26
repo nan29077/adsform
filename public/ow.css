@@ -132,3 +132,9 @@ body { background: #fff; }
 .ow-hint.left { text-align: left; margin-top: 10px; }
 a.ow-submit { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 0 18px; text-decoration: none; position: static; margin-top: 6px; width: 100%; }
 .ow-result a.ow-submit { min-height: 52px; }
+
+/* 라이브 셀러 광고 */
+.ow-live-dot { display: inline-flex; align-items: center; gap: 4px; margin-right: 2px; color: #ff6b6b; font-weight: 850; letter-spacing: .02em; }
+.ow-live-dot::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #ff4d4d; animation: ow-blink 1.4s ease-in-out infinite; }
+@keyframes ow-blink { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .ow-live-dot::before { animation: none; } }
